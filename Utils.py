@@ -1139,7 +1139,7 @@ class TimedButton(Gtk.Button):
         super().__init__(child=Gtk.DrawingArea(), css_classes=["flat", "circular", "timed"], **kwargs)
         if callback:
             self.do_reached = callback
-        if not self.rgba: App.default.get_style_manager().bind_property("accent-color-rgba", self, "rgba", DEFAULT_BIND)
+        if not self.rgba: Adw.StyleManager.get_default().bind_property("accent-color-rgba", self, "rgba", DEFAULT_BIND)
         self.get_child().set_draw_func(self.__class__.do_draw_func)
         for i in ("sensitive", "visible"): self.connect(f"notify::{i}", self.__class__.changed)
 
@@ -2640,7 +2640,6 @@ class CSS(Gtk.CssProvider):
         except Exception as e: print(e)
         try: Gtk.Settings.get_default().bind_property("gtk-interface-color-scheme", self, "prefers-color-scheme", DEFAULT_BIND)
         except Exception as e: print(e)
-        App.default.get_style_manager().bind_property("dark", self, "prefers-color-scheme", DEFAULT_BIND, self.__class__.dark_bind)
 
     def dark_bind(b, v): Gtk.InterfaceColorScheme.DARK if v else Gtk.InterfaceColorScheme.LIGHT
 
@@ -2735,7 +2734,7 @@ class App(Adw.Application):
         if log and GLib.getenv("NO_LOG") != "1":
             Task(Log).start()
             self.add_actions(("log", self.__class__.log, "F8"))
-        self.get_style_manager().bind_property("dark", Gtk.Settings.get_default(), "gtk-interface-color-scheme", DEFAULT_BIND, CSS.dark_bind)
+        Adw.StyleManager.get_default().bind_property("dark", Gtk.Settings.get_default(), "gtk-interface-color-scheme", DEFAULT_BIND, CSS.dark_bind)
 
     @staticmethod
     def log(*_):
