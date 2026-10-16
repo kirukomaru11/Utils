@@ -4185,7 +4185,8 @@ masonry view > column { border-spacing: 10px; }
 .entry-prompt .message-area  { border-spacing: 16px; }
 media picture, masonry media, masonry picture { border-radius: 13px; }
 
-mediacontrols { border-radius: 10px; margin: 6px; padding: 6px; background: var(--card-bg-color); }
+mediacontrols { border-radius: 10px; margin: 6px; padding: 6px; background: var(--card-bg-color); border-spacing: 6px; }
+mediacontrols > scale { padding: 6px 0px; }
 media > mediacontrols { opacity: 0; transition: opacity 0.5s; color: white; background: color-mix(in srgb, #222226 35%, transparent); }
 
 toolbarview.fullscreen .top-bar > windowhandle > box,
