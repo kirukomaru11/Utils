@@ -1,11 +1,12 @@
-import faulthandler
-faulthandler.enable(all_threads=True)
-
 import gi
 from warnings import filterwarnings
 filterwarnings("ignore", category=gi.PyGIWarning)
 
 from gi.repository import Adw, Gtk, Gsk, Graphene, Gdk, Pango, Gio, GLib, GObject
+
+if GLib.getenv("TEST"):
+    import faulthandler
+    faulthandler.enable(all_threads=True)
 
 class classproperty:
     def __init__(self, f): self.f = f
@@ -3619,7 +3620,7 @@ def get_adjacent_items(lst, item):
 def Path(*args):
     if not args: return SEPARATOR
     s = get_path(args[0]).rstrip(SEPARATOR) + SEPARATOR
-    if not s.startswith(SEPARATOR):
+    if SEPARATOR == "/" and not s.startswith(SEPARATOR):
         s = SEPARATOR + s
     for i in args[1:]:
         if not i or i == SEPARATOR: continue
