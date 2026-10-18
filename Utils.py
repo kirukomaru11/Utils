@@ -1763,7 +1763,7 @@ class ScaleRow(Adw.ActionRow):
         super().__init__(overflow=Gtk.Overflow.HIDDEN, **kwargs)
         self.add_css_class("scale")
         scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, minimum, maximum, step)
-        scale.set_hexpand(True)
+        scale.set_properties(hexpand=True, valign=Gtk.Align.CENTER)
         self.add_suffix(scale)
         self.bind_property("value", scale.get_adjustment(), "value", SYNC_BIND)
 
@@ -2372,7 +2372,7 @@ class VolumeButton(Gtk.MenuButton):
     __gtype_name__ = "VolumeButton"
     value = GObject.Property(type=float, minimum=0.0, default=0.5, maximum=1.0)
     def __init__(self, media=None, **kwargs):
-        scale = Gtk.Scale(draw_value=True, digits=2, height_request=200, inverted=True, orientation=Gtk.Orientation.VERTICAL)
+        scale = Gtk.Scale(draw_value=True, digits=2, height_request=200, inverted=True, orientation=Gtk.Orientation.VERTICAL, halign=Gtk.Align.CENTER)
         for i in (0.25, 0.5, 0.75): scale.add_mark(i, Gtk.PositionType.TOP)
         scale.set_range(0.0, 1.0)
         super().__init__(tooltip_text="Volume", popover=Gtk.Popover(child=scale), **kwargs)
@@ -2394,7 +2394,7 @@ class SpeedButton(Gtk.MenuButton):
     __gtype_name__ = "SpeedButton"
 
     def __init__(self, media=None, **kwargs):
-        scale = Gtk.Scale(draw_value=True, digits=2, height_request=200, inverted=True, orientation=Gtk.Orientation.VERTICAL)
+        scale = Gtk.Scale(draw_value=True, digits=2, height_request=200, inverted=True, orientation=Gtk.Orientation.VERTICAL, halign=Gtk.Align.CENTER)
         for i in (0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75): scale.add_mark(i, Gtk.PositionType.TOP)
         scale.set_range(-0.1, 2.0)
         super().__init__(tooltip_text="Speed", popover=Gtk.Popover(child=scale), **kwargs)
@@ -2417,7 +2417,7 @@ class MediaSeekbar(Gtk.Scale):
     __gtype_name__ = "MediaSeekbar"
 
     def __init__(self, media=None, **kwargs):
-        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, **kwargs)
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, valign=Gtk.Align.CENTER, **kwargs)
         self.add_css_class(self.__gtype_name__.lower())
         self.connect("change-value", self.__class__.change_value)
         self.bindings = []
@@ -2504,7 +2504,6 @@ class MediaControls(Gtk.Box):
         self.loop_button, self.volume_button, self.playback_button, self.speed_button, self.seekbar = LoopButton(), VolumeButton(), PlaybackButton(), SpeedButton(), MediaSeekbar(hexpand=True)
         for i in (self.volume_button, self.playback_button, self.speed_button, self.seekbar, self.loop_button):
             i.connect("notify::visible", self.__class__.child_visible_changed)
-            i.set_valign(Gtk.Align.END)
             self.append(i)
         self.bindings = [self.seekbar.bind_property("visible", self.loop_button, "visible", DEFAULT_BIND), self.seekbar.bind_property("visible", self.speed_button, "visible", DEFAULT_BIND, self.__class__.speed_bind), self.seekbar.bind_property("visible", self.playback_button, "visible", DEFAULT_BIND)]
         if self.media_stream: self.__class__.bind_media(self, self.media_stream)
