@@ -3566,20 +3566,15 @@ def after_launch(a, r):
 
 def launch(arg, folder=False, ask=True):
     if isinstance(arg, str):
-        if not "://" in arg:
-            arg = Gio.File.new_for_path(arg)
-        elif arg.startswith("file://"):
+        if "://" in arg:
             arg = Gio.File.new_for_uri(arg)
-    if isinstance(arg, Gio.File):
-        f = Gtk.FileLauncher.new()
-        f.set_always_ask(ask)
-        f.set_file(arg)
-        if not FLATPAK_ID and folder: f.open_containing_folder()
-        else: f.launch(callback=after_launch)
-    else:
-        u = Gtk.UriLauncher.new()
-        u.set_uri(arg if isinstance(arg, str) else arg.get_uri())
-        u.launch(callback=after_launch)
+        else:
+            arg = Gio.File.new_for_path(arg)
+    f = Gtk.FileLauncher.new()
+    f.set_always_ask(ask)
+    f.set_file(arg)
+    if not FLATPAK_ID and folder: f.open_containing_folder()
+    else: f.launch(callback=after_launch)
 
 def get_paintable(value):
     if hasattr(value, "get_custom_image"):
