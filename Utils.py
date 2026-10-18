@@ -196,9 +196,11 @@ class List(Gio.ListStore):
 
     item_class = GObject.Property(type=object)
     unique = GObject.Property(type=str)
+    static = GObject.Property(type=bool, default=False)
 
-    def __init__(self, t, unique="", list=False):
-        super().__init__(item_class=t, item_type=t, unique=unique)
+    def __init__(self, t, unique="", list=False, static=False):
+        self._dict = {}
+        super().__init__(item_class=t, item_type=t, unique=unique, static=static)
         if list:
             if not type(list) == bool: self.extend(list)
             if hasattr(self.item_class, "items_changed"): self.connect("items-changed", self.item_class.items_changed)
@@ -209,9 +211,13 @@ class List(Gio.ListStore):
                 key = self.get_n_items() + key
             return self.get_item(key)
         if not self.unique: return
+        if self.static: return self._dict.get(key, None)
         for i in self:
             v = i.get_property(self.unique)
             if v == key: return i
+
+    def do_dict(self):
+        self._dict = dict(((i.get_property(self.unique), i) for i in self))
 
     def __setitem__(self, key, kwargs):
         if self[key]: return
@@ -254,6 +260,8 @@ class List(Gio.ListStore):
         if 0 > p:
             p = self.get_n_items() + p + 1
         Gio.ListStore.insert(self, p, i)
+        if self.static:
+            self._dict[i.get_property(self.unique)] = i
         return i
 
     def add(self, d=False, **kwargs): return self.insert(-1, d=d, **kwargs)
@@ -277,6 +285,7 @@ class List(Gio.ListStore):
             a = self.index(a)
         if isinstance(a, int):
             if len(self) > a: Gio.ListStore.remove(self, a)
+        if self.static: self.do_dict()
 
     def replace(self, l=None):
         if not l:
@@ -287,6 +296,7 @@ class List(Gio.ListStore):
             l = [Gtk.StringObject.new(i) for i in l]
         if [i for i in self] == l: return
         self.splice(0, len(self), l)
+        if self.static: self.do_dict()
 
 class DBUS:
     def __init__(self, interfaces, name, register, call, bus_type=None):
@@ -838,7 +848,7 @@ class BarChart(Gtk.ListView):
     max_value = GObject.Property(type=int)
 
     def __init__(self, data=None, height_request=300):
-        super().__init__(css_name="bar-chart", orientation=Gtk.Orientation.HORIZONTAL, model=Gtk.NoSelection(), factory=BarChartBar.factory, height_request=height_request, bars=List(BarChartBar, ""), halign=Gtk.Align.CENTER)
+        super().__init__(css_name="bar-chart", orientation=Gtk.Orientation.HORIZONTAL, model=Gtk.NoSelection(), factory=BarChartBar.factory, height_request=height_request, bars=List(BarChartBar), halign=Gtk.Align.CENTER)
         self.set_css_classes([])
         self.bind_property("bars", self.get_model(), "model", DEFAULT_BIND)
         self.bars.connect("items-changed", self.__class__.items_changed, self)
