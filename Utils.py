@@ -3556,6 +3556,14 @@ def unique_name(i, d, suffix=" ", start=False, end="", n=1):
             new = f"{i}{suffix}{n}{end}"
     return new
 
+def after_launch(a, r):
+    try:
+        r = a.launch_finish(r)
+    except Exception as e:
+        r = False
+        if not "dismissed" in str(e): Toast(str(e).split(":", 1)[-1])
+    print("Launched" if r else "Could not launch", a.get_uri() if isinstance(a, Gtk.UriLauncher) else a.get_file())
+
 def launch(arg, folder=False, ask=True):
     if isinstance(arg, str):
         if not "://" in arg:
@@ -3567,12 +3575,11 @@ def launch(arg, folder=False, ask=True):
         f.set_always_ask(ask)
         f.set_file(arg)
         if not FLATPAK_ID and folder: f.open_containing_folder()
-        else: f.launch()
+        else: f.launch(callback=after_launch)
     else:
-        arg = arg if isinstance(arg, str) else arg.get_uri()
         u = Gtk.UriLauncher.new()
-        u.set_uri(arg)
-        u.launch()
+        u.set_uri(arg if isinstance(arg, str) else arg.get_uri())
+        u.launch(callback=after_launch)
 
 def get_paintable(value):
     if hasattr(value, "get_custom_image"):
