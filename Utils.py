@@ -228,7 +228,9 @@ class List(Gio.ListStore):
         if i: self.remove(i)
 
     def __iter__(self):
-        for i in range(len(self)): yield self.get_item(i)
+        for i in range(len(self)):
+            i = self.get_item(i)
+            if i: yield i
 
     def __len__(self): return self.get_property("n-items")
 
