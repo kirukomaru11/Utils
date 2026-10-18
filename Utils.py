@@ -2008,8 +2008,11 @@ class MediaStream(GObject.Object, Gdk.Paintable):
     playing = GObject.Property(type=bool, default=True)
     has_video = GObject.Property(type=bool, default=False)
     has_audio = GObject.Property(type=bool, default=False)
+    can_change_speed = GObject.Property(type=bool, default=False)
     volume = GObject.Property(type=float, minimum=0.0, default=0.0, maximum=1.0)
     speed = GObject.Property(type=float, minimum=-10.0, default=1.0, maximum=10.0)
+
+    PAINTABLE_SINK = False
 
     @GObject.Property(type=GObject.GType.from_name("gint64"), flags=GObject.ParamFlags.READWRITE)
     def duration(self): return self._duration if self._duration > 1 else 0
@@ -2019,11 +2022,11 @@ class MediaStream(GObject.Object, Gdk.Paintable):
         self._duration = n
 
     @GObject.Property(type=GObject.GType.from_name("gint64"), flags=GObject.ParamFlags.READWRITE)
-    def position(self): return self.paintable.get_property("timestamp") if isinstance(self.paintable, Gtk.MediaFile) else self._position
+    def position(self): return (self.paintable.get_property("timestamp") * 1e3) if isinstance(self.paintable, Gtk.MediaFile) else self._position
 
     @position.setter
     def position(self, timestamp):
-        if isinstance(self.paintable, Gtk.MediaFile): self.paintable.seek(timestamp)
+        if isinstance(self.paintable, Gtk.MediaFile): self.paintable.seek(timestamp / 1e3 if timestamp else timestamp)
         elif timestamp >= 0: self.seek(timestamp, flags=Gst.SeekFlags.ACCURATE | Gst.SeekFlags.FLUSH)
 
     def __init__(self, data=None, stream=True, **kwargs):
@@ -2071,45 +2074,50 @@ class MediaStream(GObject.Object, Gdk.Paintable):
             self.pipeline.get_state(10 * Gst.SECOND)
             self.duration = self.pipeline.query_duration(Gst.Format.TIME)[-1]
             if self.lock_until_done:
-                self.event = t = Event()
+                self.event = Event()
             self.pipeline.set_state(Gst.State.PAUSED)
             self.pipeline.get_by_name("Fake").set_state(Gst.State.NULL)
             self.pipeline.remove(self.pipeline.get_by_name("Fake"))
         except Exception as e: print("MediaStream:", e)
         if self.duration:
-            t = None
-            if self.has_video: self.add_video()
-            if self.has_audio: self.add_audio()
-            self.start_pipeline()
-            self.playing = playing
+            if not self.__class__.PAINTABLE_SINK and self.has_video:
+                self.playing = playing
+                self.media_file(org)
+                return
+            else:
+                if self.has_video: self.add_video()
+                if self.has_audio: self.add_audio()
+                self.start_pipeline()
+                self.playing = playing
+                self.can_change_speed = True
         elif self.has_video:
-            t = 10
             if s == "appsrc": self.pipeline.get_by_name("Source").set_state(Gst.State.READY)
-            self.add_video()
-            self.start_pipeline()
+            if self.__class__.PAINTABLE_SINK:
+                self.add_video()
+                self.start_pipeline()
         elif org:
-            t = None
             self.do_dispose()
             self.paintable = Gdk.Texture.new_from_bytes(org if isinstance(org, GLib.Bytes) else GLib.Bytes.new(org))
             self.has_video = True
             return
-        if self.has_video and self.is_empty() and self.event and not self.event.is_set(): self.event.wait(timeout=t)
+        if self.has_video and self.is_empty() and self.event and not self.event.is_set() and self.__class__.PAINTABLE_SINK: self.event.wait(timeout=10)
         if not self.duration and self.is_empty():
             if self.event and not self.event.is_set() and Log.mediastream: print("MediaStream timed out")
             try:
                 paintable = None
                 if isinstance(org, bytes):
-                    paintable = Gdk.Texture.new_from_bytes(GLib.Bytes.new(org))
-                    self.has_video = True
-                elif isinstance(org, GLib.Bytes):
+                    org = GLib.Bytes.new(org)
+                if isinstance(org, GLib.Bytes):
                     paintable = Gdk.Texture.new_from_bytes(org)
                     self.has_video = True
-                elif isinstance(org, Gio.InputStream) or self.uri:
-                    self.do_dispose()
-                    Task.invoke(self.media_file, org)
+                else:
+                    self.playing = playing
+                    self.media_file(org)
                     return
             except:
-                paintable = None
+                self.playing = playing
+                self.media_file(org)
+                return
             self.do_dispose()
             self.paintable = paintable
             self.emit("invalidate-size")
@@ -2121,19 +2129,38 @@ class MediaStream(GObject.Object, Gdk.Paintable):
         return "Empty" in s or "None" in s
 
     def media_file(self, org=None):
+        self.do_dispose()
         if not (org or self.uri): return
-        self.do_media_file(Gtk.MediaFile.new_for_input_stream(org) if org else Gtk.MediaFile.new_for_file(Gio.File.new_for_uri(self.uri)))
+        if self.lock_until_done:
+            self.event = Event()
+        if isinstance(org, bytes):
+            org = Gio.MemoryInputStream.new_from_data(org)
+        if isinstance(org, GLib.Bytes):
+            org = Gio.MemoryInputStream.new_from_bytes(org)
+        self.do_media_file(Gtk.MediaFile.new_for_input_stream(org) if isinstance(org, Gio.InputStream) else Gtk.MediaFile.new_for_file(Gio.File.new_for_uri(self.uri)))
 
     def do_media_file(self, paintable):
-        for i in ("has-video", "has-audio", "duration"): paintable.bind_property(i, self, i, DEFAULT_BIND)
-        self.bind_property("loop", paintable, "loop", SYNC_BIND)
+        for i in ("has-video", "has-audio"): paintable.bind_property(i, self, i, DEFAULT_BIND)
+        paintable.bind_property("duration", self, "duration", DEFAULT_BIND, self.__class__.duration_bind)
         self.bind_property("volume", paintable, "volume", SYNC_BIND)
-        self.bind_property("playing", paintable, "playing", SYNC_BIND)
-        self.do_dispose()
         self.paintable = paintable
-        self.connects[self.paintable] = [self.paintable.connect("invalidate-contents", self.__class__.paintable_invalidate_contents, self), self.paintable.connect("invalidate-size", self.__class__.paintable_invalidate_size, self)]
-        self.playing = self.playing
-        if self.event: self.event.wait(timeout=t)
+        self.connects[self.paintable] = [self.paintable.connect("notify::timestamp", self.__class__.timestamp_changed, self), self.paintable.connect("invalidate-contents", self.__class__.paintable_invalidate_contents, self), self.paintable.connect("invalidate-size", self.__class__.paintable_invalidate_size, self)]
+        paintable.pause()
+        paintable.play()
+        if self.event: self.event.wait(timeout=10)
+        self.bind_property("playing", paintable, "playing", SYNC_BIND)
+
+    @staticmethod
+    def duration_bind(b, v): return v * 1e3
+
+    @staticmethod
+    def timestamp_changed(p, n, self):
+        self.notify("position")
+        self.try_loop()
+
+    def try_loop(self):
+        if self.loop and self.playing and self.duration > 1 and self.position > 1 and 0.1 > (self.duration - self.position) / 1e9:
+            self.position = 0
 
     def finish(self, paintable):
         self.do_dispose()
@@ -2307,8 +2334,7 @@ class MediaStream(GObject.Object, Gdk.Paintable):
             self = args[-1]
             self._position = args[0].get_timestamp()
         self.notify("position")
-        if self.loop and self.playing and self.duration > 1 and self.position > 1 and 0.1 > (self.duration - self.position) / 1e9:
-            self.position = 0
+        self.try_loop()
 
     @staticmethod
     def update_position(pad, info, self):
@@ -2328,7 +2354,6 @@ class MediaStream(GObject.Object, Gdk.Paintable):
         if self.pipeline and hasattr(self.pipeline, "video"):
             self._position = self.pipeline.video.query_position(Gst.Format.TIME)[-1]
             self.do_update_position()
-        if isinstance(self.paintable, Gtk.MediaFile) and not self.paintable.has_audio(): self.do_update_position()
         self.emit("invalidate-contents")
 
     @staticmethod
@@ -2408,6 +2433,7 @@ class SpeedButton(Gtk.MenuButton):
         for i in self.bindings: i.unbind()
         if media:
             self.bindings = [media.bind_property("speed", self.get_popover().get_child().get_adjustment(), "value", SYNC_BIND), self.get_popover().get_child().get_adjustment().bind_property("value", self, "icon-name", DEFAULT_BIND, self.__class__.icon_bind)]
+            if hasattr(media, "can_change_speed"): self.bindings.append(media.bind_property("can-change-speed", self, "sensitive", DEFAULT_BIND))
 
     @staticmethod
     def icon_bind(b, v):
@@ -2512,7 +2538,7 @@ class MediaControls(Gtk.Box):
     @staticmethod
     def speed_bind(b, v):
         stream = b.get_property("source").get_ancestor(MediaControls).media_stream
-        return v and stream and stream.__class__.find_property("speed")
+        return v and stream and stream.__class__.find_property("speed") and getattr(stream, "can_change_speed", True)
 
     @staticmethod
     def on_key_pressed(e, v, kc, s):
@@ -2530,6 +2556,7 @@ class MediaControls(Gtk.Box):
 
     @staticmethod
     def bind_media(self, p=None):
+        self.seekbar.set_visible(False)
         for i in self.media_bindings: i.unbind()
         for i in (self.loop_button, self.volume_button, self.playback_button, self.speed_button, self.seekbar): i.bind_media(self.media_stream)
         if self.media_stream:
@@ -2920,7 +2947,7 @@ class PaintableTask(GObject.Object):
                 if _async: _async(t, user_data)
                 else: return t
                 return
-            t = MediaStream(data, uri=uri, **media_stream_args)
+            t = MediaStream(data, uri=uri, stream=not ".mp3" in uri, **media_stream_args)
             event = Event()
             Task.invoke(event.set)
             event.wait()
@@ -2944,13 +2971,7 @@ class Palette:
     @staticmethod
     def do_renderer():
         if hasattr(Palette, "renderer"): return
-        try:
-            Palette.renderer = Gsk.VulkanRenderer.new()
-        except:
-            try:
-                Palette.renderer = Gsk.GLRenderer.new()
-            except:
-                Palette.renderer = Gsk.CairoRenderer.new()
+        Palette.renderer = Gsk.CairoRenderer.new()
         Palette.renderer.realize_for_display(Gdk.Display.get_default())
         global pythonapi, gdk, c_ubyte
         from ctypes import POINTER, CDLL, pythonapi, util, c_void_p, py_object, c_size_t, c_ubyte
@@ -3846,10 +3867,11 @@ def do_gst():
     try:
         global Gst
         from gi.repository import Gst
+        if not Gst.is_initialized(): Gst.init()
+        if not MediaStream.PAINTABLE_SINK:
+            MediaStream.PAINTABLE_SINK = Gst.ElementFactory.find("gtk4paintablesink")
     except:
         Gst = False
-    if not Gst: return
-    if not Gst.is_initialized(): Gst.init()
 
 class Log(Adw.ApplicationWindow):
     __gtype_name__ = "Log"
