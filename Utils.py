@@ -3346,7 +3346,7 @@ class Toast:
                 toast_overlay = window.get_visible_dialog()
             elif window.get_visible_dialog() and isinstance(window.get_visible_dialog().get_child(), Adw.ToastOverlay):
                 toast_overlay = window.get_visible_dialog().get_child()
-        toast_overlay = toast_overlay if hasattr(toast_overlay, "add_toast") else Adw.ApplicationWindow.get_content(window) if isinstance(window, Window) else window.get_content() if hasattr(window, "get_content") else window.get_child()
+        toast_overlay = toast_overlay if hasattr(toast_overlay, "add_toast") else Adw.ApplicationWindow.get_content(window) if isinstance(window, Window) else window.get_content() if hasattr(window, "get_content") else window.get_child() if hasattr(window, "get_child") else None
         if hasattr(toast_overlay, "add_toast"): Task.invoke(toast_overlay.add_toast, Adw.Toast(title=title, use_markup=False, **kwargs))
         return False
 
