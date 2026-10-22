@@ -1499,6 +1499,7 @@ class Tag(Gtk.Button):
 
     @staticmethod
     def remove(b):
+        if not b: return
         self = b.get_ancestor(TagRow)
         if not self: return
         tag = b.get_ancestor(Tag)
