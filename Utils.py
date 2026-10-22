@@ -668,7 +668,7 @@ class PopupDialogButton(Gtk.Button):
 
     @staticmethod
     def root_changed(self, p):
-        if isinstance(PopupDialog.get_root(self), Adw.Dialog): self.set_properties(icon_name="go-up-symbolic", tooltip_text="Pop Out")
+        if isinstance(PopupDialog.get_root(self), Adw.Dialog): self.set_properties(icon_name="external-link-symbolic", tooltip_text="Pop Out")
         else: self.set_properties(icon_name="edit-undo-symbolic", tooltip_text="Back")
 
 class PopupDialog(GObject.Object):
@@ -3509,7 +3509,7 @@ class Install:
         c = f"#!/bin/python\nfrom {file} import main\nmain()"
         f = Path(Install.bin_location, info["Binary"])
         set_contents(f, contents=c)
-        GLib.chmod(f, 777)
+        GLib.chmod(f, 0o755)
 
     @staticmethod
     def do_utils():
