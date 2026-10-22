@@ -3004,7 +3004,7 @@ class Palette:
     @staticmethod
     def paintable_to_pixels(paintable=None, size=False):
         paintable = get_paintable(paintable)
-        if not paintable: return []
+        if not paintable or MediaStream.is_empty(paintable): return []
         if size:
             width, height = clamp_size(size, paintable.get_intrinsic_width(), paintable.get_intrinsic_height())
         else:
