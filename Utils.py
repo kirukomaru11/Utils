@@ -3873,7 +3873,7 @@ Gio.File.__str__ = file_str
 Gio.File.__repr__ = file_repr
 
 VersionInfo = sys.version_info
-ARGS = sys.ARGS
+ARGS = sys.argv
 
 SEPARATOR = GLib.DIR_SEPARATOR_S
 HERE = GLib.get_current_dir()
