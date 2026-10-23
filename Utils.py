@@ -4,12 +4,11 @@ from os import environ
 
 if sys.platform.startswith("win"):
     try:
-        gst_plugin_dir = sys._MEIPASS + r"\lib\gstreamer-1.0"
+        gst_plugin_dir = sys._MEIPASS + r"\gst-plugins"
         print(gst_plugin_dir)
         environ["GST_PLUGIN_SYSTEM_PATH_1_0"] = gst_plugin_dir
+        environ["GST_PLUGIN_PATH_1_0"] = gst_plugin_dir
         environ["GST_PLUGIN_PATH"] = gst_plugin_dir
-        environ["GST_PLUGIN_SCANNER"] = gst_plugin_dir + r"\gst-plugin-scanner.exe"
-        environ["PATH"] = gst_plugin_dir + ";" + environ.get("PATH", "")
         from os import add_dll_directory
         add_dll_directory(gst_plugin_dir)
     except: pass
@@ -3935,16 +3934,17 @@ class Log(Adw.ApplicationWindow):
         header.pack_end(Button(t=Gtk.MenuButton, css_classes=("flat",), icon_name="open-menu", menu_model=m, tooltip_text="Options"))
         header.pack_end(Button(callback=self.__class__.clear_all, tooltip_text="Clear All", icon_name="edit-clear-all", css_classes=("flat", "circular", "destructive-action",)))
         toolbar.add_top_bar(header)
-        try:
-            self.__class__.stdout = sys.stdout
+        if getattr(sys, "stderr", False):
             self.__class__.stderr = sys.stderr
-            sys.stdout.original_write = sys.stdout.write
             sys.stderr.original_write = sys.stderr.write
-            sys.stdout.write = self.__class__.add_out
             sys.stderr.write = self.__class__.add_error
+        if getattr(sys, "stdout", False):
+            self.__class__.stdout = sys.stdout
+            sys.stdout.original_write = sys.stdout.write
+            sys.stdout.write = self.__class__.add_out
+        if getattr(sys, "default_excepthook", False):
             self.__class__.default_excepthook = sys.excepthook
             sys.excepthook = self.__class__.handle_error
-        except Exception as e: print(e)
         self.command = Gtk.TextView(valign=Gtk.Align.END)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.append(toolbar)
@@ -4006,7 +4006,7 @@ class Log(Adw.ApplicationWindow):
     @staticmethod
     def add_error(text):
         self = Log.instance
-        Task.invoke(self.stderr.original_write, text, log=False)
+        if getattr(self, "stderr", False): Task.invoke(self.stderr.original_write, text, log=False)
         if text.strip():
             Task.invoke(self.check_size)
             Task.invoke(setattr, self, "empty", False)
@@ -4019,7 +4019,7 @@ class Log(Adw.ApplicationWindow):
     @staticmethod
     def add_out(text):
         self = Log.instance
-        Task.invoke(self.stdout.original_write, text, log=False)
+        if getattr(self, "stdout", False): Task.invoke(self.stdout.original_write, text, log=False)
         if text.strip():
             Task.invoke(self.check_size)
             Task.invoke(setattr, self, "empty", False)
