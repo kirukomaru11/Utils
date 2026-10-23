@@ -1,10 +1,10 @@
-from sys import platform
+import sys
+
 from os import environ
 
-if platform.startswith("win"):
+if sys.platform.startswith("win"):
     try:
-        from sys import _MEIPASS
-        gst_plugin_dir = _MEIPASS + r"\lib\gstreamer-1.0"
+        gst_plugin_dir = sys._MEIPASS + r"\lib\gstreamer-1.0"
         environ["GST_PLUGIN_SYSTEM_PATH_1_0"] = gst_plugin_dir
         environ["GST_PLUGIN_PATH"] = gst_plugin_dir
         environ["GST_PLUGIN_SCANNER"] = gst_plugin_dir + r"\gst-plugin-scanner.exe"
@@ -2742,9 +2742,7 @@ class App(Adw.Application):
                 self.run(ARGS)
                 exit()
         if FLATPAK_ID: Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(Path(SYSTEM_DATA[0], self.get_application_id()))
-        try:
-            from sys import _MEIPASS
-            Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(Path(_MEIPASS, "assets"))
+        try: Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(Path(sys._MEIPASS, "assets"))
         except: pass
         self.utils_css = self.__class__.UTILS_CSS + "\n"
         self.bind_property("css", CSS(), "css", SYNC_BIND)
@@ -3873,8 +3871,8 @@ Adw.Dialog.get_all = staticmethod(get_all_dialog)
 Gio.File.__str__ = file_str
 Gio.File.__repr__ = file_repr
 
-from sys import version_info as VersionInfo
-from sys import argv as ARGS
+VersionInfo = sys.version_info
+ARGS = sys.ARGS
 
 SEPARATOR = GLib.DIR_SEPARATOR_S
 HERE = GLib.get_current_dir()
@@ -3936,7 +3934,6 @@ class Log(Adw.ApplicationWindow):
         header.pack_end(Button(t=Gtk.MenuButton, css_classes=("flat",), icon_name="open-menu", menu_model=m, tooltip_text="Options"))
         header.pack_end(Button(callback=self.__class__.clear_all, tooltip_text="Clear All", icon_name="edit-clear-all", css_classes=("flat", "circular", "destructive-action",)))
         toolbar.add_top_bar(header)
-        import sys
         self.__class__.stdout = sys.stdout
         self.__class__.stderr = sys.stderr
         sys.stdout.original_write = sys.stdout.write
