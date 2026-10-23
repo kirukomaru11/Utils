@@ -1,3 +1,20 @@
+from sys import platform
+from os import environ
+
+if platform.startswith("win"):
+    msys_prefix = environ.get("MSYSTEM_PREFIX", r"C:\msys64\ucrt64")
+    gst_plugin_dir = msys_prefix + r"\lib\gstreamer-1.0"
+    bin_dir = msys_prefix + r"\bin"
+    environ["GST_PLUGIN_SYSTEM_PATH_1_0"] = gst_plugin_dir
+    environ["GST_PLUGIN_PATH"] = gst_plugin_dir
+    environ["PATH"] = bin_dir + r"\"" + environ.get("PATH", "")
+    try:
+        from os import add_dll_directory
+        add_dll_directory(bin_dir)
+        add_dll_directory(gst_plugin_dir)
+    except:
+        pass
+
 import gi
 from warnings import filterwarnings
 filterwarnings("ignore", category=gi.PyGIWarning)
@@ -2727,6 +2744,10 @@ class App(Adw.Application):
                 self.run(ARGS)
                 exit()
         if FLATPAK_ID: Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(Path(SYSTEM_DATA[0], self.get_application_id()))
+        try:
+            from sys import _MEIPASS
+            Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(Path(_MEIPASS, "assets"))
+        except: pass
         self.utils_css = self.__class__.UTILS_CSS + "\n"
         self.bind_property("css", CSS(), "css", SYNC_BIND)
         for i in ("utils-css", "color-css"): self.bind_property(i, CSS(priority=Gtk.STYLE_PROVIDER_PRIORITY_THEME), "css", SYNC_BIND)
