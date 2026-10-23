@@ -2924,7 +2924,7 @@ class PaintableTask(GObject.Object):
             data, uri, _async, user_data, media_stream_args, error = args
             if is_online(uri) and isinstance(data, bytes):
                 try:
-                    h = data.decode("utf-8")
+                    h = data.decode()
                     if not "<!DOCTYPE html>" in h:
                         h = ""
                 except:
@@ -3699,7 +3699,7 @@ def set_contents(*args, contents=""):
     for i in args:
         parent = get_parent(get_path(i))
         if not exists(parent): make_dirs(parent)
-        GLib.file_set_contents(get_path(i), contents.encode("utf-8") if isinstance(contents, str) else contents)
+        GLib.file_set_contents(get_path(i), contents.encode() if isinstance(contents, str) else contents)
 
 def get_contents(*args, b=False):
     for i in args: return Gio.File.new_for_path(get_path(i)).load_bytes()[0] if b else GLib.file_get_contents(get_path(i))[-1]
