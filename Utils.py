@@ -3940,7 +3940,7 @@ class Log(Adw.ApplicationWindow):
             self.__class__.stdout = sys.stdout
             sys.stdout.original_write = sys.stdout.write
             sys.stdout.write = self.__class__.add_out
-        if getattr(sys, "default_excepthook", False):
+        if getattr(sys, "excepthook", False):
             self.__class__.default_excepthook = sys.excepthook
             sys.excepthook = self.__class__.handle_error
         self.command = Gtk.TextView(valign=Gtk.Align.END)
