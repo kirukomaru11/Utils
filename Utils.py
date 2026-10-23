@@ -12,8 +12,7 @@ if platform.startswith("win"):
         from os import add_dll_directory
         add_dll_directory(bin_dir)
         add_dll_directory(gst_plugin_dir)
-    except:
-        pass
+    except: pass
 
 import gi
 from warnings import filterwarnings
