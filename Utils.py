@@ -2,11 +2,8 @@ import sys
 
 from os import environ
 
-print(sys.platform)
-
 if sys.platform.startswith("win") and hasattr(sys, "_MEIPASS"):
-    gst_plugin_dir = sys._MEIPASS + r"\gst-plugins"
-    print(gst_plugin_dir)
+    gst_plugin_dir = sys._MEIPASS + r"\gst_plugins"
     environ["GST_PLUGIN_PATH"] = gst_plugin_dir
     from os import add_dll_directory
     add_dll_directory(gst_plugin_dir)
@@ -17,7 +14,7 @@ filterwarnings("ignore", category=gi.PyGIWarning)
 
 from gi.repository import Adw, Gtk, Gsk, Graphene, Gdk, Pango, Gio, GLib, GObject
 
-if GLib.getenv("TEST"):
+if sys.platform == "linux" and GLib.getenv("TEST"):
     import faulthandler
     faulthandler.enable(all_threads=True)
 
@@ -3004,7 +3001,10 @@ class Palette:
         from ctypes import POINTER, CDLL, pythonapi, util, c_void_p, py_object, c_size_t, c_ubyte
         pythonapi.PyCapsule_GetPointer.restype = c_void_p
         pythonapi.PyCapsule_GetPointer.argtypes = [py_object]
-        gdk = CDLL(util.find_library("gdk-4"))
+        if sys.platform.startswith("win") and hasattr(sys, "_MEIPASS"):
+            gdk = CDLL(sys._MEIPASS + r"\libgtk-4-1.dll")
+        else:
+            gdk = CDLL(util.find_library("gdk-4"))
         gdk.gdk_texture_download.argtypes = [c_void_p, POINTER(c_ubyte), c_size_t]
         gdk.gdk_texture_download.restype = None
 
@@ -4334,7 +4334,3 @@ window.alert { min-height: 0px; }
 .autocomplete listview row:only-child,
 .autocomplete listview row:last-child { margin: 0px; }
 """.strip()
-
-if sys.platform.startswith("win") and hasattr(sys, "_MEIPASS"):
-    for i in (sys._MEIPASS, Path(sys._MEIPASS, "lib")):
-        if exists(i): print(i, list_dir(i))
