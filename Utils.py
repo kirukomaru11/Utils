@@ -2074,7 +2074,7 @@ class MediaStream(GObject.Object, Gdk.Paintable):
         else:
             org = data
             if isinstance(data, bytes):
-                if stream:
+                if stream and Gst.ElementFactory.find("giostreamsrc"):
                     data = Gio.MemoryInputStream.new_from_data(data)
                 else:
                     s = "appsrc"
@@ -2982,6 +2982,8 @@ class PaintableTask(GObject.Object):
             if error:
                 if Log.paintabletask: print("data_to_paintable error", e)
                 Task.invoke(error, *(data, uri, _async, user_data, media_stream_args, e))
+                import traceback
+                traceback.print_exc()
             return None
 
 class Palette:
