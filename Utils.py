@@ -2251,7 +2251,7 @@ class MediaStream(GObject.Object, Gdk.Paintable):
         self.pipeline.seek_simple(Gst.Format.TIME, Gst.SeekFlags.ACCURATE | Gst.SeekFlags.FLUSH, 0)
 
     def add_audio(self):
-        for t, n in (("audioconvert", "Audio"), ("volume", "Volume"), ("pulsesink", "AudioSink")): self.pipeline.add(Gst.ElementFactory.make(t, n))
+        for t, n in (("audioconvert", "Audio"), ("volume", "Volume"), ("pulsesink" if sys.platform == "linux" else "autoaudiosink", "AudioSink")): self.pipeline.add(Gst.ElementFactory.make(t, n))
         self.pipeline.get_by_name("Volume").set_property("volume", self.volume)
         self.pipeline.get_by_name("Volume").link(self.pipeline.get_by_name("AudioSink"))
         self.pipeline.get_by_name("Audio").link(self.pipeline.get_by_name("Volume"))
@@ -2982,8 +2982,6 @@ class PaintableTask(GObject.Object):
             if error:
                 if Log.paintabletask: print("data_to_paintable error", e)
                 Task.invoke(error, *(data, uri, _async, user_data, media_stream_args, e))
-                import traceback
-                traceback.print_exc()
             return None
 
 class Palette:
