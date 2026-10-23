@@ -3,7 +3,6 @@ import sys
 from os import environ
 
 if sys.platform.startswith("win") and hasattr(sys, "_MEIPASS"):
-    environ["GI_TYPELIB_PATH"] = sys._MEIPASS + r"\lib\girepository-1.0"
     gst_plugin_dir = sys._MEIPASS + r"\gst_plugins"
     environ["GST_PLUGIN_PATH"] = gst_plugin_dir
     from os import add_dll_directory
