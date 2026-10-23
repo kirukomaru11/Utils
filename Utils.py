@@ -2601,7 +2601,7 @@ class Media(Gtk.Overlay):
     @staticmethod
     def on_scroll(e, x, y):
         self = e.get_widget()
-        if isinstance(self.media_stream, MediaStream) and self.media_stream.has_audio and self.media_stream.has_video:
+        if not isinstance(self.picture, Picture) and isinstance(self.media_stream, MediaStream) and self.media_stream.has_audio and self.media_stream.has_video:
             self.media_stream.volume = float(max(0.0, min(self.media_stream.volume + -y * 0.02, 1.0)))
             return True
 
