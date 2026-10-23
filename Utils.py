@@ -1,16 +1,3 @@
-from sys import platform
-from os import environ
-
-if platform.startswith("win"):
-    try:
-        from sys import _MEIPASS
-        gst_plugin_dir = _MEIPASS + r"\lib\gstreamer-1.0"
-        environ["GST_PLUGIN_SYSTEM_PATH_1_0"] = gst_plugin_dir
-        environ["GST_PLUGIN_PATH"] = gst_plugin_dir
-        from os import add_dll_directory
-        add_dll_directory(gst_plugin_dir)
-    except: pass
-
 import gi
 from warnings import filterwarnings
 filterwarnings("ignore", category=gi.PyGIWarning)
