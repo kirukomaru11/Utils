@@ -2255,12 +2255,21 @@ class MediaStream(GObject.Object, Gdk.Paintable):
         self.pipeline.get_by_name("Volume").set_property("volume", self.volume)
         self.pipeline.get_by_name("Volume").link(self.pipeline.get_by_name("AudioSink"))
         self.pipeline.get_by_name("Audio").link(self.pipeline.get_by_name("Volume"))
-        self.pipeline.get_by_name("Decode").link_pads("audio_0", self.pipeline.get_by_name("Audio"), "sink")
+        if sys.platform == "linux": self.pipeline.get_by_name("Decode").link_pads("audio_0", self.pipeline.get_by_name("Audio"), "sink")
+        else:
+            for t, n in (("audioresample", "Resample"), ): self.pipeline.add(Gst.ElementFactory.make(t, n))
+            self.pipeline.get_by_name("Resample").link(self.pipeline.get_by_name("Audio"))
+            self.pipeline.get_by_name("Decode").link_pads("audio_0", self.pipeline.get_by_name("Resample"), "sink")
         if not self.has_video: self.pipeline.get_by_name("Audio").get_static_pad("sink").add_probe(Gst.PadProbeType.BUFFER, self.__class__.update_position, self)
 
     def add_video(self):
         self.set_paintable()
-        self.pipeline.video = self.pipeline.get_by_name("Paintable")
+        if sys.platform == "linux":
+            self.pipeline.video = self.pipeline.get_by_name("Paintable")
+        else:
+            self.pipeline.video = Gst.ElementFactory.make("videoconvert", "VideoConvert")
+            self.pipeline.add(self.pipeline.video)
+            self.pipeline.video.link(self.pipeline.get_by_name("Paintable"))
         if 1 > self.duration:
             self.pipeline.set_clock(None)
             d, p = self.pipeline.get_by_name("Decode").children[0].get_factory(), self.pipeline.get_by_name("Decode").children[1].children[0].get_factory()
@@ -2998,23 +3007,23 @@ class Palette:
         if hasattr(Palette, "renderer"): return
         Palette.renderer = Gsk.CairoRenderer.new()
         Palette.renderer.realize_for_display(Gdk.Display.get_default())
-        global pythonapi, gdk, c_ubyte
+        global pythonapi, gtk, c_ubyte
         from ctypes import POINTER, CDLL, pythonapi, util, c_void_p, py_object, c_size_t, c_ubyte
         pythonapi.PyCapsule_GetPointer.restype = c_void_p
         pythonapi.PyCapsule_GetPointer.argtypes = [py_object]
-        if sys.platform.startswith("win") and hasattr(sys, "_MEIPASS"):
-            gdk = CDLL(sys._MEIPASS + r"\libgtk-4-1.dll")
-        else:
-            gdk = CDLL(util.find_library("gdk-4"))
-        gdk.gdk_texture_download.argtypes = [c_void_p, POINTER(c_ubyte), c_size_t]
-        gdk.gdk_texture_download.restype = None
+        try:
+            gtk
+        except:
+            gtk = CDLL(util.find_library("gtk-4") or "libgtk-4-1.dll")
+        gtk.gdk_texture_download.argtypes = [c_void_p, POINTER(c_ubyte), c_size_t]
+        gtk.gdk_texture_download.restype = None
 
     @staticmethod
     def download_texture(texture):
         Palette.do_renderer()
         stride = texture.get_width() * 4
         buffer = (c_ubyte * (stride * texture.get_height()))()
-        gdk.gdk_texture_download(pythonapi.PyCapsule_GetPointer(texture.__gpointer__, None), buffer, stride)
+        gtk.gdk_texture_download(pythonapi.PyCapsule_GetPointer(texture.__gpointer__, None), buffer, stride)
         return buffer
 
     @staticmethod
