@@ -2,16 +2,14 @@ import sys
 
 from os import environ
 
-if sys.platform.startswith("win"):
-    try:
-        gst_plugin_dir = sys._MEIPASS + r"\gst-plugins"
-        print(gst_plugin_dir)
-        environ["GST_PLUGIN_SYSTEM_PATH_1_0"] = gst_plugin_dir
-        environ["GST_PLUGIN_PATH_1_0"] = gst_plugin_dir
-        environ["GST_PLUGIN_PATH"] = gst_plugin_dir
-        from os import add_dll_directory
-        add_dll_directory(gst_plugin_dir)
-    except: pass
+print(sys.platform)
+
+if sys.platform.startswith("win") and hasattr(sys, "_MEIPASS"):
+    gst_plugin_dir = sys._MEIPASS + r"\gst-plugins"
+    print(gst_plugin_dir)
+    environ["GST_PLUGIN_PATH"] = gst_plugin_dir
+    from os import add_dll_directory
+    add_dll_directory(gst_plugin_dir)
 
 import gi
 from warnings import filterwarnings
@@ -2742,8 +2740,7 @@ class App(Adw.Application):
                 self.run(ARGS)
                 exit()
         if FLATPAK_ID: Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(Path(SYSTEM_DATA[0], self.get_application_id()))
-        try: Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(Path(sys._MEIPASS, "assets"))
-        except: pass
+        if hasattr(sys, "_MEIPASS"): Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(Path(sys._MEIPASS, "assets"))
         self.utils_css = self.__class__.UTILS_CSS + "\n"
         self.bind_property("css", CSS(), "css", SYNC_BIND)
         for i in ("utils-css", "color-css"): self.bind_property(i, CSS(priority=Gtk.STYLE_PROVIDER_PRIORITY_THEME), "css", SYNC_BIND)
@@ -4337,3 +4334,7 @@ window.alert { min-height: 0px; }
 .autocomplete listview row:only-child,
 .autocomplete listview row:last-child { margin: 0px; }
 """.strip()
+
+if sys.platform.startswith("win") and hasattr(sys, "_MEIPASS"):
+    for i in (sys._MEIPASS, Path(sys._MEIPASS, "lib")):
+        if exists(i): print(i, list_dir(i))
