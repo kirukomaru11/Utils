@@ -2,15 +2,12 @@ from sys import platform
 from os import environ
 
 if platform.startswith("win"):
-    msys_prefix = environ.get("MSYSTEM_PREFIX", r"C:\msys64\ucrt64")
-    gst_plugin_dir = msys_prefix + r"\lib\gstreamer-1.0"
-    bin_dir = msys_prefix + r"\bin"
-    environ["GST_PLUGIN_SYSTEM_PATH_1_0"] = gst_plugin_dir
-    environ["GST_PLUGIN_PATH"] = gst_plugin_dir
-    environ["PATH"] = bin_dir + r"\"" + environ.get("PATH", "")
     try:
+        from sys import _MEIPASS
+        gst_plugin_dir = _MEIPASS + r"\lib\gstreamer-1.0"
+        environ["GST_PLUGIN_SYSTEM_PATH_1_0"] = gst_plugin_dir
+        environ["GST_PLUGIN_PATH"] = gst_plugin_dir
         from os import add_dll_directory
-        add_dll_directory(bin_dir)
         add_dll_directory(gst_plugin_dir)
     except: pass
 
@@ -2084,7 +2081,7 @@ class MediaStream(GObject.Object, Gdk.Paintable):
                 else:
                     s = "appsrc"
             if isinstance(data, GLib.Bytes):
-                if stream:
+                if stream and Gst.ElementFactory.find("giostreamsrc"):
                     data = Gio.MemoryInputStream.new_from_bytes(data)
                 else:
                     data = Online.get_data(data)
