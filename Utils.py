@@ -4012,7 +4012,7 @@ class Log(Adw.ApplicationWindow):
             Task.invoke(self.present, log=False)
 
     def check_size(self):
-        if len([i for i in self.box]) > 100: self.box.remove(self.box.get_first_child())
+        if self.box and len([i for i in self.box]) > 100: self.box.remove(self.box.get_first_child())
 
     @staticmethod
     def add_out(text):
