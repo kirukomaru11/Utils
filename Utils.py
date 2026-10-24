@@ -2270,8 +2270,8 @@ class MediaStream(GObject.Object, Gdk.Paintable):
             self.pipeline.video = Gst.ElementFactory.make("videoconvert", "VideoConvert")
             self.pipeline.add(self.pipeline.video)
             self.pipeline.video.link(self.pipeline.get_by_name("Paintable"))
-        if 1 > self.duration:
-            self.pipeline.set_clock(None)
+        if 1 > self.duration: self.pipeline.set_clock(None)
+        if 1 > self.duration and sys.platform == "linux":
             d, p = self.pipeline.get_by_name("Decode").children[0].get_factory(), self.pipeline.get_by_name("Decode").children[1].children[0].get_factory()
             self.pipeline.get_by_name("Decode").set_state(Gst.State.NULL)
             self.pipeline.remove(self.pipeline.get_by_name("Decode"))
@@ -2738,14 +2738,14 @@ class App(Adw.Application):
                 global PACKAGE_LOCATION
                 PACKAGE_LOCATION = Path("/app", PACKAGE_LOCATION)
             Install()
-            exit()
+            sys.exit()
         if Gio.ApplicationFlags.NON_UNIQUE in self.get_flags():
             App.default = self
         else:
             self.register()
             if self.get_is_remote():
                 self.run(ARGS)
-                exit()
+                sys.exit()
         if FLATPAK_ID: Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(Path(SYSTEM_DATA[0], self.get_application_id()))
         if hasattr(sys, "_MEIPASS"): Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(Path(sys._MEIPASS, "assets"))
         self.utils_css = self.__class__.UTILS_CSS + "\n"
@@ -3449,7 +3449,7 @@ class Install:
     def __init__(self):
         if ARGS[0].startswith(PACKAGE_LOCATION):
             print("Already installed...")
-            exit()
+            sys.exit()
         if Install.icons: Install.do_icons()
         if Install.utils: Install.do_utils()
         if Install.app: Install.do_app()
@@ -3457,7 +3457,7 @@ class Install:
         if Install.info and Install.metainfo: Install.do_metainfo(Install.info)
         if Install.info and Install.bin: Install.do_bin(Install.info)
         if Install.extra: Install.extra()
-        exit()
+        sys.exit()
 
     @staticmethod
     def do_desktop(info, force=False):
@@ -3892,7 +3892,7 @@ CACHE = GLib.get_user_cache_dir()
 TRASH = Path(DATA, "Trash")
 FLATPAK_ID = GLib.getenv("FLATPAK_ID")
 
-if not GLib.getenv("GST_PLUGIN_FEATURE_RANK"): GLib.setenv("GST_PLUGIN_FEATURE_RANK", "gifdec:0,avdec_gif:256")
+if sys.platform == "linux" and not GLib.getenv("GST_PLUGIN_FEATURE_RANK"): GLib.setenv("GST_PLUGIN_FEATURE_RANK", "gifdec:0,avdec_gif:256")
 
 DEFAULT_BIND = GObject.BindingFlags.DEFAULT | GObject.BindingFlags.SYNC_CREATE
 SYNC_BIND = DEFAULT_BIND | GObject.BindingFlags.BIDIRECTIONAL
@@ -4241,8 +4241,8 @@ if not hasattr(Adw, "ToggleGroup"):
 
 App.UTILS_CSS += """
 :root { --color-1: var(--window-bg-color); --color-2: var(--window-bg-color); --color-3: var(--window-bg-color); }
-toolbarview.fullscreen .bottom-bar > windowhandle > box,
-toolbarview.fullscreen .top-bar > windowhandle > box { background: color-mix(in srgb, #222226 35%, transparent); color: white; }
+toolbarview.fullscreen .top-bar > windowhandle > box,
+toolbarview.fullscreen .bottom-bar > windowhandle > box { background: color-mix(in srgb, #222226 35%, transparent); color: white; }
 masonry view { border-spacing: 10px; margin: 10px; }
 masonry view > column { border-spacing: 10px; }
 .entry-prompt entry text { margin: 12px 5px 12px 5px; }
@@ -4256,6 +4256,7 @@ mediacontrols > scale { padding: 6px 0px; }
 media > mediacontrols { opacity: 0; transition: opacity 0.5s; color: white; background: color-mix(in srgb, #222226 35%, transparent); }
 
 toolbarview.fullscreen .top-bar > windowhandle > box,
+toolbarview.fullscreen .bottom-bar > windowhandle > box,
 media > mediacontrols { backdrop-filter: blur(20px) brightness(0.9); }
 
 media > mediacontrols:hover { opacity: 1; }
