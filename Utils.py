@@ -3645,10 +3645,9 @@ def get_paintable(value):
     return value
 
 def paintable_to_value(v):
-    if not isinstance(v, Gdk.Texture):
-        v = get_paintable(v)
-        if v:
-            v = paintable_get_texture(v)
+    v = get_paintable(v)
+    if v:
+        v = paintable_get_texture(v)
     if v: return Gdk.ContentProvider.new_for_bytes("image/png", v.save_to_png_bytes())
 
 def paintable_get_texture(v):
