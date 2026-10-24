@@ -2251,7 +2251,7 @@ class MediaStream(GObject.Object, Gdk.Paintable):
         self.pipeline.seek_simple(Gst.Format.TIME, Gst.SeekFlags.ACCURATE | Gst.SeekFlags.FLUSH, 0)
 
     def add_audio(self):
-        for t, n in (("audioconvert", "Audio"), ("volume", "Volume"), ("pulsesink" if sys.platform == "linux" else "autoaudiosink", "AudioSink")): self.pipeline.add(Gst.ElementFactory.make(t, n))
+        for t, n in (("audioconvert", "Audio"), ("volume", "Volume"), ("autoaudiosink", "AudioSink")): self.pipeline.add(Gst.ElementFactory.make(t, n))
         self.pipeline.get_by_name("Volume").set_property("volume", self.volume)
         self.pipeline.get_by_name("Volume").link(self.pipeline.get_by_name("AudioSink"))
         self.pipeline.get_by_name("Audio").link(self.pipeline.get_by_name("Volume"))
@@ -2264,14 +2264,11 @@ class MediaStream(GObject.Object, Gdk.Paintable):
 
     def add_video(self):
         self.set_paintable()
-        if sys.platform == "linux":
-            self.pipeline.video = self.pipeline.get_by_name("Paintable")
-        else:
-            self.pipeline.video = Gst.ElementFactory.make("videoconvert", "VideoConvert")
-            self.pipeline.add(self.pipeline.video)
-            self.pipeline.video.link(self.pipeline.get_by_name("Paintable"))
+        self.pipeline.video = Gst.ElementFactory.make("videoconvert", "VideoConvert")
+        self.pipeline.add(self.pipeline.video)
+        self.pipeline.video.link(self.pipeline.get_by_name("Paintable"))
         if 1 > self.duration: self.pipeline.set_clock(None)
-        if 1 > self.duration and sys.platform == "linux":
+        if 1 > self.duration and hasattr(self.pipeline.get_by_name("Decode"), "children") and hasattr(self.pipeline.get_by_name("Decode").children[0], "children") and hasattr(self.pipeline.get_by_name("Decode").children[1], "children"):
             d, p = self.pipeline.get_by_name("Decode").children[0].get_factory(), self.pipeline.get_by_name("Decode").children[1].children[0].get_factory()
             self.pipeline.get_by_name("Decode").set_state(Gst.State.NULL)
             self.pipeline.remove(self.pipeline.get_by_name("Decode"))
@@ -3892,8 +3889,6 @@ CACHE = GLib.get_user_cache_dir()
 TRASH = Path(DATA, "Trash")
 FLATPAK_ID = GLib.getenv("FLATPAK_ID")
 
-if sys.platform == "linux" and not GLib.getenv("GST_PLUGIN_FEATURE_RANK"): GLib.setenv("GST_PLUGIN_FEATURE_RANK", "gifdec:0,avdec_gif:256")
-
 DEFAULT_BIND = GObject.BindingFlags.DEFAULT | GObject.BindingFlags.SYNC_CREATE
 SYNC_BIND = DEFAULT_BIND | GObject.BindingFlags.BIDIRECTIONAL
 INVERT_BIND = DEFAULT_BIND | GObject.BindingFlags.INVERT_BOOLEAN
@@ -3904,7 +3899,13 @@ def do_gst():
     try:
         global Gst
         from gi.repository import Gst
-        if not Gst.is_initialized(): Gst.init()
+        if not Gst.is_initialized():
+            Gst.init()
+            registry = Gst.Registry.get()
+            for name, rank in (("avdec_gif", 256), ("gifdec", 0)):
+                feature = registry.find_feature(name, Gst.ElementFactory)
+                if not feature: break
+                feature.set_rank(rank)
         if not MediaStream.PAINTABLE_SINK:
             MediaStream.PAINTABLE_SINK = Gst.ElementFactory.find("gtk4paintablesink")
     except:
