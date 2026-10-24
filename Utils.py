@@ -679,7 +679,7 @@ class PopupDialogButton(Gtk.Button):
 
     @staticmethod
     def root_changed(self, p):
-        if isinstance(PopupDialog.get_root(self), Adw.Dialog): self.set_properties(icon_name="external-link-symbolic", tooltip_text="Pop Out")
+        if isinstance(PopupDialog.get_root(self), Adw.Dialog): self.set_properties(icon_name="adw-external-link-symbolic", tooltip_text="Pop Out")
         else: self.set_properties(icon_name="edit-undo-symbolic", tooltip_text="Back")
 
 class PopupDialog(GObject.Object):
@@ -706,6 +706,14 @@ class PopupDialog(GObject.Object):
         for i in (dialog_kwargs, window_kwargs): i.update(kwargs)
         if not "application" in window_kwargs:
             window_kwargs["application"] = App.default
+        for i in ("content_width", "content_height"):
+            if i in window_kwargs:
+                window_kwargs[i.replace("content", "default")] = window_kwargs[i]
+                del window_kwargs[i]
+        for i in ("default_width", "default_height"):
+            if i in dialog_kwargs:
+                dialog_kwargs[i.replace("default", "content")] = dialog_kwargs[i]
+                del dialog_kwargs[i]
         self.window = window or Adw.Window(**window_kwargs)
         self.window.set_properties(content=Adw.ToastOverlay())
         self.dialog = dialog or Adw.Dialog(**dialog_kwargs)
@@ -714,7 +722,6 @@ class PopupDialog(GObject.Object):
         self.title = title
         for i in (self.window, self.dialog): self.bind_property("title", i, "title", DEFAULT_BIND)
         self.window.connect("close-request", self.__class__.do_close)
-        self.dialog.connect("close-attempt", self.__class__.do_close)
         self.dialog.connect("closed", self.__class__.do_close)
 
     def get_child(self):
@@ -732,7 +739,9 @@ class PopupDialog(GObject.Object):
     def do_close(w):
         self = PopupDialog.get_self(w)
         if not self: return
-        if not getattr(self, "doing", False): self.do_dispose()
+        if not getattr(self, "doing", False):
+            if getattr(self, "do_closed", False): self.do_closed(self)
+            self.do_dispose()
 
     def pick(self, *args):
         if self.window.get_mapped(): return self.window.pick(*args)
@@ -753,7 +762,7 @@ class PopupDialog(GObject.Object):
             w.close()
             w.set_application(None)
             w.destroy()
-        self.doing = False
+        self.do_closed = self.doing = False
 
     def set_title(self, t=""): self.set_property("title", t)
 
@@ -773,8 +782,11 @@ class PopupDialog(GObject.Object):
         if self.content and self.content.get_parent(): self.content.unparent()
 
     def close(self):
+        self.doing = True
         for i in (self.window, self.dialog):
             if i: i.close()
+        self.doing = False
+        self.__class__.do_close(self)
 
     def present(self, a=None):
         self.doing = True
@@ -3226,7 +3238,7 @@ class Online:
     @staticmethod
     def do_manual_intervention(uri, content="", function=None, function_data=None, settings=None, context=None):
         if not Online.has_init() and not Online.init(): return
-        if any(i.get_title().split("://", 1)[-1].split("/")[0] == uri.split("://", 1)[-1].split("/")[0] for i in Adw.Dialog.get_all()): return
+        if any(i.get_title().split("://", 1)[-1].split("/")[0] == uri.split("://", 1)[-1].split("/")[0] for i in PopupDialog.get_all()): return
         if not settings:
             settings = WebKit.Settings.new()
             settings.set_properties(allow_file_access_from_file_urls=True, allow_top_navigation_to_data_urls=True,  allow_universal_access_from_file_urls=True, default_charset="utf-8", allow_modal_dialogs=True, javascript_can_open_windows_automatically=True, javascript_can_access_clipboard=True, enable_encrypted_media=True, enable_webrtc=True, enable_developer_extras=True, enable_write_console_messages_to_stdout=True, webrtc_udp_ports_range="", disable_web_security=True)
@@ -3242,11 +3254,13 @@ class Online:
             context.set_cache_model(WebKit.CacheModel.WEB_BROWSER)
             context.set_web_process_extensions_directory(App.default.data_folder.get_path())
         view = WebKit.WebView(web_context=context, settings=settings, network_session=Online.NetworkSession)
-        w = Adw.Dialog(child=Adw.ToastOverlay(child=Adw.ToolbarView(extend_content_to_top_edge=True, content=view)), title=uri, content_width=800, content_height=800)
+        w = PopupDialog(content=Adw.ToolbarView(extend_content_to_top_edge=True, content=view), title=uri, content_width=800, content_height=800)
         w.view = view
-        w.add_css_class("toolbar-fullscreen")
-        w.get_child().get_child().add_top_bar(Adw.HeaderBar())
-        w.connect("closed", Online.do_write_manual_intervention_data)
+        w.get_content().add_css_class("fullscreen")
+        h = Adw.HeaderBar()
+        h.pack_end(PopupDialogButton())
+        w.get_content().add_top_bar(h)
+        w.do_closed = Online.do_write_manual_intervention_data
         if function and function_data: function(w, function_data)
         elif function: function(w)
         w.present(Window.current)
@@ -3284,10 +3298,12 @@ class Online:
 
     @staticmethod
     def do_write_manual_intervention_data(w):
+        if not w or not hasattr(w, "view"): return
         w.view.get_network_session().get_cookie_manager().get_all_cookies(None, Online.write_cookies, w.view.get_settings().get_user_agent())
         Task.invoke(w.view.load_uri, "")
         Task.invoke(w.view.terminate_web_process)
         w.view = None
+        w.do_dispose()
 
 from threading import Event, Thread, current_thread, main_thread
 
