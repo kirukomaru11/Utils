@@ -2268,7 +2268,7 @@ class MediaStream(GObject.Object, Gdk.Paintable):
         self.pipeline.add(self.pipeline.video)
         self.pipeline.video.link(self.pipeline.get_by_name("Paintable"))
         if 1 > self.duration: self.pipeline.set_clock(None)
-        if 1 > self.duration and hasattr(self.pipeline.get_by_name("Decode"), "children") and hasattr(self.pipeline.get_by_name("Decode").children[0], "children") and hasattr(self.pipeline.get_by_name("Decode").children[1], "children"):
+        if 1 > self.duration and hasattr(self.pipeline.get_by_name("Decode"), "children") and hasattr(self.pipeline.get_by_name("Decode").children[1], "children"):
             d, p = self.pipeline.get_by_name("Decode").children[0].get_factory(), self.pipeline.get_by_name("Decode").children[1].children[0].get_factory()
             self.pipeline.get_by_name("Decode").set_state(Gst.State.NULL)
             self.pipeline.remove(self.pipeline.get_by_name("Decode"))
