@@ -3,7 +3,7 @@ import sys
 from os import environ
 
 if sys.platform.startswith("win") and hasattr(sys, "_MEIPASS"):
-    # environ["GI_TYPELIB_PATH"] = sys._MEIPASS + r"\gi_typelibs"
+    environ["GI_TYPELIB_PATH"] = sys._MEIPASS + r"\gi_typelibs"
     gst_plugin_dir = sys._MEIPASS + r"\gst_plugins"
     environ["GST_PLUGIN_PATH"] = gst_plugin_dir
     from os import add_dll_directory
@@ -4013,7 +4013,9 @@ class Log(Adw.ApplicationWindow):
     @staticmethod
     def add_error(text):
         self = Log.instance
-        if getattr(self, "stderr", False): Task.invoke(self.stderr.original_write, text, log=False)
+        if getattr(self, "stderr", False):
+            try: Task.invoke(self.stderr.original_write, text, log=False)
+            except: pass
         if text.strip():
             Task.invoke(self.check_size)
             Task.invoke(setattr, self, "empty", False)
@@ -4026,7 +4028,9 @@ class Log(Adw.ApplicationWindow):
     @staticmethod
     def add_out(text):
         self = Log.instance
-        if getattr(self, "stdout", False): Task.invoke(self.stdout.original_write, text, log=False)
+        if getattr(self, "stdout", False):
+            try: Task.invoke(self.stdout.original_write, text, log=False)
+            except: pass
         if text.strip():
             Task.invoke(self.check_size)
             Task.invoke(setattr, self, "empty", False)
