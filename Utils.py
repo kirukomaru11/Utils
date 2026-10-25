@@ -3279,7 +3279,7 @@ class Online:
             try:
                 global WebKit
                 from gi.repository import WebKit
-            except Exception as e: return print(e, "No WebKit")
+            except Exception as e: return Task.invoke(Toast, "No WebKit found")
             Online.NetworkSession = WebKit.NetworkSession.new_ephemeral()
             Online.NetworkSession.set_itp_enabled(False)
             Online.NetworkSession.set_tls_errors_policy(WebKit.TLSErrorsPolicy.IGNORE)
