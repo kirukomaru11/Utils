@@ -3926,7 +3926,7 @@ def do_gst():
     except:
         Gst = False
 
-class Log(Adw.ApplicationWindow):
+class Log(Adw.Window):
     __gtype_name__ = "Log"
     instance = None
     box = GObject.Property(type=object)
@@ -3936,6 +3936,8 @@ class Log(Adw.ApplicationWindow):
     time = GObject.Property(type=Gtk.Button)
     def __init__(self):
         super().__init__(hide_on_close=True, visible=False, title="Log", default_width=360, default_height=364, content=Adw.ToastOverlay())
+        self.actions = Gio.SimpleActionGroup()
+        self.insert_action_group(self.__gtype_name__.lower(), self.actions)
         self.time = Button(t=Gtk.ToggleButton, tooltip_text="Time", icon_name="preferences-system-time")
         Window.controller_init(self)
         self.__class__.instance = self
@@ -3949,7 +3951,7 @@ class Log(Adw.ApplicationWindow):
         toolbar = Adw.ToolbarView(vexpand=True, content=overlay)
         overlay.add_overlay(empty)
         header = Adw.HeaderBar()
-        d = dict((i, "win." + i.lower().replace(" ", "-")) for i in ("Toast", "Online", "Task", "Palette", "MediaStream", "PaintableTask"))
+        d = dict((i, self.__gtype_name__.lower() + "." + i.lower().replace(" ", "-")) for i in ("Toast", "Online", "Task", "Palette", "MediaStream", "PaintableTask"))
         m = Menu(d)
         f = get_variant(False)
         for i in d: self.add_action(Gio.SimpleAction.new_stateful(i.lower().replace(" ", "-"), None, f))
@@ -3973,6 +3975,10 @@ class Log(Adw.ApplicationWindow):
         box.append(toolbar)
         box.append(self.command)
         self.get_content().set_child(box)
+
+    def add_action(self, action): self.actions.add_action(action)
+
+    def lookup_action(self, name): return self.actions.lookup_action(name)
 
     @staticmethod
     def on_key_pressed(e, v, c, s):
