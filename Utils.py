@@ -1342,8 +1342,8 @@ class Masonry(Gtk.ScrolledWindow):
 
     def remove_all(self):
         for i in self.children: i.unparent()
-        self.check_layout()
         self.children = []
+        self.check_layout()
 
     def get_direction_child(self, w, d):
         if d in (Gtk.DirectionType.UP, Gtk.DirectionType.DOWN): return w.get_prev_sibling() if d == Gtk.DirectionType.UP else w.get_next_sibling()
