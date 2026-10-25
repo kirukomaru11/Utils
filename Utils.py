@@ -1689,7 +1689,7 @@ class TextRow(Adw.PreferencesRow):
     text = GObject.Property(type=str)
     text_widget = GObject.Property(type=Gtk.TextView)
     def __init__(self, title=""):
-        text = Gtk.TextView(accepts_tab=False, wrap_mode=Gtk.WrapMode.WORD_CHAR, justification=Gtk.Justification.CENTER)
+        text = Gtk.TextView(accepts_tab=False, wrap_mode=Gtk.WrapMode.WORD_CHAR, justification=Gtk.Justification.CENTER, vscroll_policy=Gtk.ScrollablePolicy.NATURAL, vexpand=True)
         overlay = Gtk.Overlay(child=text)
         super().__init__(overflow=Gtk.Overflow.HIDDEN, selectable=True, focusable=False, activatable=True, title=title, child=overlay)
         self.text_widget = text
