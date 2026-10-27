@@ -3373,9 +3373,8 @@ class Button:
 class Toast:
     def __new__(cls, title="", message=None, toast_overlay=False, **kwargs):
         title = str(title)
-        if Log.toast:
-            if message: print(message)
-            else: print(title)
+        if message: print(message)
+        if Log.toast: print("Toast:", title)
         window = App.default.get_active_window()
         if not (window and window.get_mapped()):
             window = next((w for w in Gtk.Window.list_toplevels() if w.get_mapped()), False)
@@ -3955,6 +3954,7 @@ class Log(Adw.Window):
         m = Menu(d)
         f = get_variant(False)
         for i in d: self.add_action(Gio.SimpleAction.new_stateful(i.lower().replace(" ", "-"), None, f))
+        self.lookup_action("toast").set_state(get_variant(True))
         header.pack_start(self.time)
         header.pack_end(Button(t=Gtk.MenuButton, css_classes=("flat",), icon_name="open-menu", menu_model=m, tooltip_text="Options"))
         header.pack_end(Button(callback=self.__class__.clear_all, tooltip_text="Clear All", icon_name="edit-clear-all", css_classes=("flat", "circular", "destructive-action",)))
