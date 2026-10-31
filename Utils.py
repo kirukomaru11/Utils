@@ -784,7 +784,7 @@ class PopupDialog(GObject.Object):
     def close(self):
         self.doing = True
         for i in (self.window, self.dialog):
-            if i: i.close()
+            if i and (i.get_mapped() or i.get_visible()): i.close()
         self.doing = False
         self.__class__.do_close(self)
 
@@ -3145,6 +3145,7 @@ class Palette:
 
 class Online:
     headers = {}
+    browser_cookies = None
     @staticmethod
     def init():
         try:
@@ -3168,6 +3169,10 @@ class Online:
         he = {"Referer": url}
         he.update(Online.headers)
         he.update(headers)
+        if "User-Agent" in he and "Firefox" in he["User-Agent"]:
+            he.setdefault("Sec-Fetch-Dest", "document")
+            he.setdefault("Sec-Fetch-Mode", "navigate")
+            he.setdefault("Sec-Fetch-Site", "none")
         message = Soup.Message.new("GET", url)
         h = message.get_request_headers()
         for k, v in he.items():
@@ -3274,12 +3279,57 @@ class Online:
         Task.invoke(Online.start_intervention, [uri, content, function, function_data])
 
     @staticmethod
+    def BrowserIntervention(uri):
+        l = []
+        if FLATPAK_ID:
+            try:
+                data = get_parent(get_parent(App.default.data_folder))
+                if "org.mozilla.firefox" in list_dir(data):
+                    data = Path(data, "org.mozilla.firefox", "config", "mozilla", "firefox")
+                    l.append(data)
+            except: pass
+        l.append(Path(HOME, ".mozilla", "firefox"))
+        if sys.platform.startswith("win"): l.append(Path(GLib.getenv("APPDATA") or "", "Mozilla", "Firefox", "Profiles"))
+        for data in l:
+            i = Path(data, "installs.ini")
+            if exists(i):
+                profile = next((it for it in get_contents(i).decode().split("\n") if it.startswith("Default=")), "").split("=", 1)[-1]
+                if profile:
+                    c = Path(data, profile, "cookies.sqlite")
+                    if exists(c):
+                        Online.browser_cookies = c
+                break
+        if not Online.browser_cookies: return
+        for i in Data(Online.browser_cookies, readonly=True).read(table="moz_cookies", return_dict=True, force_tuple=True):
+            c = Soup.Cookie.new(i.get("name", "unnamed"), i.get("value", ""), i.get("host", ""), i.get("path", "/"), 0)
+            c.set_expires(GLib.DateTime.new_from_unix_utc(i["expiry"] / 1e3))
+            c.set_secure(i.get("isSecure", False))
+            r = i.get("sameSite", 256)
+            if r != 256:
+                try: c.set_same_site_policy(r)
+                except Exception as e: print(e)
+            c.set_http_only(i.get("isHttpOnly", False))
+            Online.Cookies.add_cookie(c)
+        if GLib.getenv("USER_AGENT"):
+            user_agent = GLib.getenv("USER_AGENT")
+        else:
+            version = next((it for it in get_contents(Path(get_parent(Online.browser_cookies), "compatibility.ini")).decode().split("\n") if it.startswith("LastVersion=")), "").split("=", 1)[-1].split("_", 1)[0] or "159.0"
+            platform = "X11; Linux x86_64" if sys.platform == "linux" else "Windows NT 10.0; Win64; x64"
+            user_agent = f"Mozilla/5.0 ({platform}; rv:{version}) Gecko/20100101 Firefox/{version}"
+        Online.add_cookie(name="user_agent", value=user_agent, domain="user.agent")
+        Online.headers.setdefault("User-Agent", user_agent)
+        launch(uri)
+
+    @staticmethod
     def start_intervention(args, **kwargs):
         if not hasattr(Online, "NetworkSession"):
             try:
                 global WebKit
                 from gi.repository import WebKit
-            except Exception as e: return Task.invoke(Toast, "No WebKit found")
+            except Exception as e:
+                if not Online.browser_cookies: Task.invoke(Toast, "No WebKit found")
+                Online.BrowserIntervention(args[0])
+                return
             Online.NetworkSession = WebKit.NetworkSession.new_ephemeral()
             Online.NetworkSession.set_itp_enabled(False)
             Online.NetworkSession.set_tls_errors_policy(WebKit.TLSErrorsPolicy.IGNORE)
