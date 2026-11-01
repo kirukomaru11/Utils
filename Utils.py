@@ -1281,8 +1281,7 @@ class Masonry(Gtk.ScrolledWindow):
         for n, i in enumerate(self.view): i.set_visible(columns >= n + 1)
         d = dict((str(i + 1), [0, columns_widgets[i], [], [it for it in columns_widgets[i]]]) for i in range(columns))
         for i in self.children:
-            size = i.get_preferred_size()[1]
-            width, height = size.width, size.height
+            width, height = i.get_width(), i.get_height()
             s = max(1, column_width) / max(1, width)
             width, height = int(width * s), int(height * s)
             column = "1"
@@ -2065,7 +2064,7 @@ class MediaStream(GObject.Object, Gdk.Paintable):
         if isinstance(self.paintable, Gtk.MediaFile): self.paintable.seek(timestamp / 1e3 if timestamp else timestamp)
         elif timestamp >= 0: self.seek(timestamp, flags=Gst.SeekFlags.ACCURATE | Gst.SeekFlags.FLUSH)
 
-    def __init__(self, data=None, stream=True, **kwargs):
+    def __init__(self, data=None, stream=True, caps="", **kwargs):
         do_gst()
         self._position = self._duration = 0
         super().__init__(**kwargs)
@@ -2085,6 +2084,8 @@ class MediaStream(GObject.Object, Gdk.Paintable):
             s2 = "! "
         else:
             org = data
+            if isinstance(data, Gst.Buffer):
+                org = None
             if isinstance(data, bytes):
                 if stream and Gst.ElementFactory.find("giostreamsrc"):
                     data = Gio.MemoryInputStream.new_from_data(data)
@@ -2099,43 +2100,55 @@ class MediaStream(GObject.Object, Gdk.Paintable):
             if isinstance(data, Gio.InputStream):
                 s = "giostreamsrc"
         try:
-            self.pipeline = Gst.parse_launch(f"{s} name=Source {s2}decodebin3 async_handling=false message_forward=false name=Decode ! fakesink sync=false qos=false name=Fake")
-            self.pipeline.set_bus(None)
-            self.pipeline.set_properties(async_handling=False, message_forward=False)
-            self.pipeline.get_by_name("Decode").connect("select-stream", self.__class__.select_stream, self)
-            if s == "appsrc": MediaStream.appsrc(self.pipeline.get_by_name("Source"), data)
-            elif s == "giostreamsrc": self.pipeline.get_by_name("Source").set_property("stream", data)
-            self.pipeline.get_by_name("Source").link(self.pipeline.get_by_name("Decode"))
-            self.pipeline.set_state(Gst.State.PLAYING)
-            self.pipeline.get_state(10 * Gst.SECOND)
-            self.duration = self.pipeline.query_duration(Gst.Format.TIME)[-1]
+            if isinstance(data, Gst.Buffer) and caps and self.__class__.PAINTABLE_SINK:
+                self.pipeline = Gst.parse_bin_from_description(f"appsrc emit-signals=false block=false name=Source caps={caps}")
+            else:
+                self.pipeline = Gst.parse_launch(f"{s} name=Source {s2}decodebin3 async_handling=false message_forward=false name=Decode ! fakesink sync=false qos=false name=Fake")
             if self.lock_until_done:
                 self.event = Event()
-            self.pipeline.set_state(Gst.State.PAUSED)
-            self.pipeline.get_by_name("Fake").set_state(Gst.State.NULL)
-            self.pipeline.remove(self.pipeline.get_by_name("Fake"))
-        except Exception as e: print("MediaStream:", e)
-        if self.duration:
-            if not self.__class__.PAINTABLE_SINK and self.has_video:
-                self.playing = playing
-                self.media_file(org)
-                return
+            self.pipeline.set_bus(None)
+            self.pipeline.set_properties(async_handling=False, message_forward=False)
+            if isinstance(self.pipeline, Gst.Pipeline):
+                self.pipeline.get_by_name("Decode").connect("select-stream", self.__class__.select_stream, self)
+                if s.startswith("appsrc"): MediaStream.appsrc(self.pipeline.get_by_name("Source"), data)
+                elif s == "giostreamsrc": self.pipeline.get_by_name("Source").set_property("stream", data)
+                self.pipeline.get_by_name("Source").link(self.pipeline.get_by_name("Decode"))
+                self.pipeline.set_state(Gst.State.PLAYING)
+                self.pipeline.get_state(10 * Gst.SECOND)
+                self.duration = self.pipeline.query_duration(Gst.Format.TIME)[-1]
+                self.pipeline.set_state(Gst.State.PAUSED)
+                self.pipeline.get_by_name("Fake").set_state(Gst.State.NULL)
+                self.pipeline.remove(self.pipeline.get_by_name("Fake"))
             else:
-                if self.has_video: self.add_video()
-                if self.has_audio: self.add_audio()
-                self.start_pipeline()
-                self.playing = playing
-                self.can_change_speed = True
-        elif self.has_video:
-            if s == "appsrc": self.pipeline.get_by_name("Source").set_state(Gst.State.READY)
-            if self.__class__.PAINTABLE_SINK:
-                self.add_video()
-                self.start_pipeline()
-        elif org:
-            self.do_dispose()
-            self.paintable = Gdk.Texture.new_from_bytes(org if isinstance(org, GLib.Bytes) else GLib.Bytes.new(org))
-            self.has_video = True
-            return
+                self.has_video = True
+                self.set_paintable()
+                self.pipeline.get_by_name("Source").link(self.pipeline.get_by_name("Paintable"))
+                self.pipeline.set_state(Gst.State.PLAYING)
+                self.pipeline.get_by_name("Source").emit("push-buffer", data)
+                return
+        except Exception as e: print("MediaStream:", e)
+        if isinstance(self.pipeline, Gst.Pipeline):
+            if self.duration:
+                if not self.__class__.PAINTABLE_SINK and self.has_video:
+                    self.playing = playing
+                    self.media_file(org)
+                    return
+                else:
+                    if self.has_video: self.add_video()
+                    if self.has_audio: self.add_audio()
+                    self.start_pipeline()
+                    self.playing = playing
+                    self.can_change_speed = True
+            elif self.has_video:
+                if s == "appsrc": self.pipeline.get_by_name("Source").set_state(Gst.State.READY)
+                if self.__class__.PAINTABLE_SINK:
+                    self.add_video()
+                    self.start_pipeline()
+            elif org:
+                self.do_dispose()
+                self.paintable = Gdk.Texture.new_from_bytes(org if isinstance(org, GLib.Bytes) else GLib.Bytes.new(org))
+                self.has_video = True
+                return
         if self.has_video and self.is_empty() and self.event and not self.event.is_set() and self.__class__.PAINTABLE_SINK: self.event.wait(timeout=10)
         if not self.duration and self.is_empty():
             if self.event and not self.event.is_set() and Log.mediastream: print("MediaStream timed out")
@@ -2235,8 +2248,12 @@ class MediaStream(GObject.Object, Gdk.Paintable):
     def appsrc(appsrc=None, data=None):
         if not appsrc:
             appsrc = Gst.ElementFactory.make("appsrc", "Source")
-        appsrc.data = data if isinstance(data, bytes) else Online.get_data(data)
-        appsrc.set_properties(stream_type=1, format=Gst.Format.BYTES, size=len(appsrc.data), block=True)
+        if isinstance(data, Gst.Buffer):
+            appsrc.data = data
+            Task.invoke(appsrc.emit, "push-buffer", appsrc.data)
+        else:
+            appsrc.data = data if isinstance(data, bytes) else Online.get_data(data)
+            appsrc.set_properties(stream_type=1, format=Gst.Format.BYTES, size=len(appsrc.data), block=True)
         appsrc.connect("need-data", MediaStream.on_need_data)
         appsrc.connect("seek-data", MediaStream.on_seek_data)
         return appsrc
@@ -2244,6 +2261,7 @@ class MediaStream(GObject.Object, Gdk.Paintable):
     @staticmethod
     def on_need_data(appsrc, length):
         if not hasattr(appsrc, "data"): return
+        if isinstance(appsrc.data, Gst.Buffer): return appsrc.emit("push-buffer", appsrc.data)
         offset = getattr(appsrc, "current_offset", 0)
         if offset >= appsrc.get_property("size"): return appsrc.emit("end-of-stream")
         chunk_size = min(length, appsrc.get_property("size") - offset)
@@ -2280,7 +2298,7 @@ class MediaStream(GObject.Object, Gdk.Paintable):
         self.pipeline.add(self.pipeline.video)
         self.pipeline.video.link(self.pipeline.get_by_name("Paintable"))
         if 1 > self.duration: self.pipeline.set_clock(None)
-        if 1 > self.duration and hasattr(self.pipeline.get_by_name("Decode"), "children") and hasattr(self.pipeline.get_by_name("Decode").children[1], "children"):
+        if 1 > self.duration and len(getattr(self.pipeline.get_by_name("Decode"), "children", [])) >= 2 and hasattr(self.pipeline.get_by_name("Decode").children[1], "children"):
             d, p = self.pipeline.get_by_name("Decode").children[0].get_factory(), self.pipeline.get_by_name("Decode").children[1].children[0].get_factory()
             self.pipeline.get_by_name("Decode").set_state(Gst.State.NULL)
             self.pipeline.remove(self.pipeline.get_by_name("Decode"))
@@ -2289,17 +2307,19 @@ class MediaStream(GObject.Object, Gdk.Paintable):
             self.pipeline.get_by_name("Source").link(self.pipeline.get_by_name("Decode"))
             self.pipeline.get_by_name("Decode").link(self.pipeline.get_by_name("Parsed"))
             self.pipeline.get_by_name("Parsed").link(self.pipeline.video)
-        else: self.pipeline.get_by_name("Decode").link_pads("video_0", self.pipeline.video, "sink")
+        else:
+            if "video_0" in [i.name for i in self.pipeline.get_by_name("Decode").srcpads]: self.pipeline.get_by_name("Decode").link_pads("video_0", self.pipeline.video, "sink")
+            else: self.pipeline.get_by_name("Decode").link(self.pipeline.video)
 
     def set_paintable(self, t=False):
         if Task.current() is Task.main():
-            paintable = Gst.ElementFactory.make("gtk4paintablesink", "Paintable")
+            if not self.pipeline.get_by_name("Paintable"): self.pipeline.add(Gst.ElementFactory.make("gtk4paintablesink", "Paintable"))
+            paintable = self.pipeline.get_by_name("Paintable")
             if paintable.find_property("reconfigure-on-window-resize"): paintable.set_property("reconfigure-on-window-resize", 0)
             paintable.set_property("qos", False)
             if 1 > self.duration:
                 paintable.set_property("async", False)
                 paintable.set_property("sync", False)
-            self.pipeline.add(paintable)
             self.paintable = paintable.get_property("paintable")
             self.connects[self.paintable] = [self.paintable.connect("invalidate-contents", self.__class__.paintable_invalidate_contents, self), self.paintable.connect("invalidate-size", self.__class__.paintable_invalidate_size, self), self.paintable.connect("notify::position", self.__class__.do_update_position, self)]
             if t: Task.invoke(t.set)
