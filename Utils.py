@@ -3022,20 +3022,66 @@ class PaintableTask(GObject.Object):
                 Task.invoke(error, *(data, uri, _async, user_data, media_stream_args, e))
             return None
 
-class Palette:
+class Paintable:
     @staticmethod
-    def set_colors(arg=None):
-        App.default.color_css = (":root { " + " ".join(tuple(fr"--color-{n + 1}: rgb{c};" for n, c in enumerate(arg.colors))) + " }") if arg and hasattr(arg, "colors") and arg.colors else ""
-        for w in App.default.get_windows():
-            if App.default.color_css:
-                if not "colored" in w.get_css_classes(): w.add_css_class("colored")
-            elif "colored" in w.get_css_classes(): w.remove_css_class("colored")
+    def to_pixels(paintable=None, size=False):
+        if not size and isinstance(paintable, Gdk.Texture):
+            width, height = paintable.get_intrinsic_width(), paintable.get_intrinsic_height()
+            data = Paintable.download_texture(paintable)
+        else:
+            paintable = Paintable.get(paintable)
+            if not paintable or MediaStream.is_empty(paintable): return []
+            width, height = paintable.get_intrinsic_width(), paintable.get_intrinsic_height()
+            if size:
+                width, height = clamp_size(size, width, height)
+            node = Paintable.resize(paintable, w=width if size else 0, h=height if size else 0, node=True)
+            if node:
+                data = Paintable.download_texture(Paintable.render_texture(node))
+            else:
+                print("Could not get the node from", paintable)
+                return []
+        return RGBAPixels(data, width, height)
+
+    @staticmethod
+    def crop(paintable, x=0, y=0, w=0, h=0, node=False):
+        if w == 0 and h == 0:
+            if node:
+                snapshot = Gtk.Snapshot.new()
+                paintable.snapshot(snapshot, paintable.get_intrinsic_width(), paintable.get_intrinsic_height())
+                return snapshot.to_node()
+            return paintable
+        snapshot = Gtk.Snapshot.new()
+        paintable.snapshot(snapshot, paintable.get_intrinsic_width(), paintable.get_intrinsic_height())
+        cropped = Gtk.Snapshot.new()
+        r = Graphene.Rect()
+        Graphene.Rect.init(r, 0, 0, max(w, 1), max(h, 1))
+        cropped.push_clip(r)
+        p = Graphene.Point()
+        Graphene.Point.init(p, -x, -y)
+        cropped.translate(p)
+        cropped.append_node(snapshot.to_node())
+        cropped.pop()
+        if node: return cropped.to_node()
+        return cropped.to_paintable()
+
+    @staticmethod
+    def resize(paintable, w=0, h=0, node=False):
+        if w == 0 and h == 0:
+            if node:
+                snapshot = Gtk.Snapshot.new()
+                paintable.snapshot(snapshot, paintable.get_intrinsic_width(), paintable.get_intrinsic_height())
+                return snapshot.to_node()
+            return paintable
+        snapshot = Gtk.Snapshot.new()
+        paintable.snapshot(snapshot, w, h)
+        if node: return snapshot.to_node()
+        return snapshot.to_paintable()
 
     @staticmethod
     def do_renderer():
-        if hasattr(Palette, "renderer"): return
-        Palette.renderer = Gsk.CairoRenderer.new()
-        Palette.renderer.realize_for_display(Gdk.Display.get_default())
+        if hasattr(Paintable, "renderer"): return
+        Paintable.renderer = Gsk.CairoRenderer.new()
+        Paintable.renderer.realize_for_display(Gdk.Display.get_default())
         global pythonapi, gtk, c_ubyte
         from ctypes import POINTER, CDLL, pythonapi, util, c_void_p, py_object, c_size_t, c_ubyte
         pythonapi.PyCapsule_GetPointer.restype = c_void_p
@@ -3048,45 +3094,77 @@ class Palette:
         gtk.gdk_texture_download.restype = None
 
     @staticmethod
+    def render_texture(node):
+        Paintable.do_renderer()
+        return Paintable.renderer.render_texture(node)
+
+    @staticmethod
     def download_texture(texture):
-        Palette.do_renderer()
         stride = texture.get_width() * 4
         buffer = (c_ubyte * (stride * texture.get_height()))()
         gtk.gdk_texture_download(pythonapi.PyCapsule_GetPointer(texture.__gpointer__, None), buffer, stride)
         return buffer
 
     @staticmethod
-    def paintable_to_pixels(paintable=None, size=False):
-        paintable = get_paintable(paintable)
-        if not paintable or MediaStream.is_empty(paintable): return []
-        if size:
-            width, height = clamp_size(size, paintable.get_intrinsic_width(), paintable.get_intrinsic_height())
-        else:
-            width, height = paintable.get_intrinsic_width(), paintable.get_intrinsic_height()
+    def get(value):
+        if hasattr(value, "get_custom_image"):
+            value = value.get_custom_image()
+        if hasattr(value, "get_media_stream"):
+            value = value.get_media_stream()
+        if hasattr(value, "get_paintable"):
+            value = value.get_paintable()
+        if hasattr(value, "get_static_image"):
+            value = value.get_static_image() or value
+        if hasattr(value, "get_current_image"):
+            value = value.get_current_image() or value
+        return value
+
+    @staticmethod
+    def to_value(v):
+        v = Paintable.get(v)
+        if v:
+            v = Paintable.to_texture(v)
+        if v: return Gdk.ContentProvider.new_for_bytes("image/png", v.save_to_png_bytes())
+
+    @staticmethod
+    def to_texture(v):
         snapshot = Gtk.Snapshot.new()
-        paintable.snapshot(snapshot, width, height)
-        node = snapshot.to_node()
-        if node:
-            Palette.do_renderer()
-            data = Palette.download_texture(Palette.renderer.render_texture(node))
-        else:
-            print("Could not get the node from", paintable)
-            return []
-        l = []
-        stride = width * 4
-        for y in range(height):
-            row_start = y * stride
-            for x in range(width):
-                i = row_start + x * 4
-                l.append((data[i + 2], data[i + 1], data[i], data[i + 3]))
-        return l
+        v.snapshot(snapshot, v.get_intrinsic_width(), v.get_intrinsic_height())
+        v = snapshot.to_node()
+        v = Paintable.render_texture(v)
+        return v
+
+class RGBAPixels:
+    def __init__(self, data, width, height):
+        self.data = data
+        self.width = width
+        self.height = height
+
+    def __getitem__(self, index):
+        if isinstance(index, tuple):
+            x, y = index
+            index = y * self.width + x
+
+        i = index * 4
+        return self.data[i+2], self.data[i+1], self.data[i], self.data[i+3]
+
+    def __len__(self): return self.width * self.height
+
+class Palette:
+    @staticmethod
+    def set_colors(arg=None):
+        App.default.color_css = (":root { " + " ".join(tuple(fr"--color-{n + 1}: rgb{c};" for n, c in enumerate(arg.colors))) + " }") if arg and hasattr(arg, "colors") and arg.colors else ""
+        for w in App.default.get_windows():
+            if App.default.color_css:
+                if not "colored" in w.get_css_classes(): w.add_css_class("colored")
+            elif "colored" in w.get_css_classes(): w.remove_css_class("colored")
 
     @staticmethod
     def from_paintable(value, size=64, colors=3, duration=10, minimum_light=10, maximum_light=60, minimum_saturation=50, distance=40):
         if hasattr(value, "colors") and isinstance(value.colors, list) and len(value.colors) == colors: return value.colors
         start = GLib.get_monotonic_time() if duration else 0
         try:
-            pixel_colors = Palette.paintable_to_pixels(paintable=value, size=size)
+            pixel_colors = Paintable.to_pixels(paintable=value, size=size)
         except Exception as e:
             print("Palette:", e)
             return []
@@ -3715,33 +3793,6 @@ def launch(arg, folder=False, ask=True):
     f.set_file(arg)
     if not FLATPAK_ID and folder: f.open_containing_folder()
     else: f.launch(callback=after_launch)
-
-def get_paintable(value):
-    if hasattr(value, "get_custom_image"):
-        value = value.get_custom_image()
-    if hasattr(value, "get_media_stream"):
-        value = value.get_media_stream()
-    if hasattr(value, "get_paintable"):
-        value = value.get_paintable()
-    if hasattr(value, "get_static_image"):
-        value = value.get_static_image() or value
-    if hasattr(value, "get_current_image"):
-        value = value.get_current_image() or value
-    return value
-
-def paintable_to_value(v):
-    v = get_paintable(v)
-    if v:
-        v = paintable_get_texture(v)
-    if v: return Gdk.ContentProvider.new_for_bytes("image/png", v.save_to_png_bytes())
-
-def paintable_get_texture(v):
-    snapshot = Gtk.Snapshot.new()
-    v.snapshot(snapshot, v.get_intrinsic_width(), v.get_intrinsic_height())
-    v = snapshot.to_node()
-    Palette.do_renderer()
-    v = Palette.renderer.render_texture(v)
-    return v
 
 def clamp_size(size, w, h):
     if size and max(w, h) > size:
