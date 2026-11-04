@@ -24,22 +24,23 @@ class classproperty:
     def __get__(self, obj, owner): return self.f(owner)
 
 class Data(GObject.Object):
-    __gtype_name__ = "Data"
     path = GObject.Property(type=str)
     data = GObject.Property(type=object)
+    readonly = GObject.Property(type=bool, default=False)
     def __init__(self, path, init="", readonly=False):
         super().__init__()
+        self.readonly = readonly
         self.path = path
         make_dirs(get_parent(path))
         from sqlite3 import connect
-        if readonly:
+        if self.readonly:
             path = uri_encode(path) + "?immutable=1"
         self.data = connect(path, timeout=30, check_same_thread=False, autocommit=False, uri="://" in path)
-        if readonly:
+        if self.readonly:
             for i in ("query_only",): self.execute(f"PRAGMA {i}").close()
         else:
             for i in ("foreign_keys = ON", "auto_vacuum = full", "optimize = 0x10002", "secure_delete = true", "journal_mode = WAL"): self.execute(f"PRAGMA {i}").close()
-        if not readonly:
+        if not self.readonly:
             if init: self.data.executescript(init).close()
             self.commit()
 
@@ -58,6 +59,7 @@ class Data(GObject.Object):
         return [i[0] for i in v]
 
     def update(self, table="", column="*", value=None, conditions="", conds=()):
+        if self.readonly: return
         if column != "*":
             column = f'"{column}"'
         t = f'UPDATE "{table}" SET {column} = ? WHERE {conditions}'
@@ -65,10 +67,12 @@ class Data(GObject.Object):
         self.commit()
 
     def delete(self, table="", conditions="", conds=()):
+        if self.readonly: return
         self.execute(f"DELETE FROM '{table}' WHERE {conditions}", conds).close()
         self.commit()
 
     def new(self, table="", names=(), values=()):
+        if self.readonly: return
         self.execute("INSERT INTO '" + table + "' " + (('(' + ', '.join("'" + i + "'" for i in names) + ') ') if names else '') + "VALUES(" + ', '.join('?' for _ in values) + ")", values).close()
         self.commit()
 
@@ -104,6 +108,7 @@ class Data(GObject.Object):
         return v
 
     def swap(self, table, column, v1, v2):
+        if self.readonly: return
         self.update(table=table, column=column, value=-1, conditions=f"{column} = ?", conds=(v1,))
         self.update(table=table, column=column, value=v1, conditions=f"{column} = ?", conds=(v2,))
         self.update(table=table, column=column, value=v2, conditions=f"{column} = ?", conds=(-1,))
@@ -130,7 +135,7 @@ class Data(GObject.Object):
     def do_persist_action(a, p, data): data.update(table=a.table, column=a.name, value=a.get_state().unpack(), conditions=a.conditions, conds=a.conds)
 
     def set_default(self, table="", conditions="", conds=(), names=(), values=()):
-        if not self.exists(table=table, conditions=conditions, conds=conds): self.new(table=table, names=names, values=values)
+        if not self.exists(table=table, conditions=conditions, conds=conds) and not self.readonly: self.new(table=table, names=names, values=values)
 
     def table_clear(self, table):
         self.execute(f"DELETE FROM '{table}'").close()
@@ -147,11 +152,21 @@ class Data(GObject.Object):
     @staticmethod
     def dict_factory(c, r): return {col[0]: r[i] for i, col in enumerate(c.description)}
 
-    @staticmethod
-    def setting(name, default, update=None):
-        if update != None: App.default.data.update(table="Settings", column="Value", value=update, conditions="Key = ?", conds=(name,))
+    def setting(self, *args, update=None):
+        if isinstance(self, Data):
+            if len(args) == 3:
+                name, default, update = args
+            else:
+                name, default = args
         else:
-            v = App.default.data.get(table="Settings", column="Value", conditions="Key = ?", conds=(name,), values=(name, default))
+            name = self
+            self = App.default.data
+            default = args[0]
+            if len(args) == 2:
+                update = args[1]
+        if update != None: self.update(table="Settings", column="Value", value=update, conditions="Key = ?", conds=(name,))
+        else:
+            v = self.get(table="Settings", column="Value", conditions="Key = ?", conds=(name,), values=(name, default))
             if v and isinstance(v, str) and len(v) == 1 and v.isdigit():
                 v = int(v)
             return v
@@ -165,7 +180,6 @@ class Data(GObject.Object):
     def close(self): return self.data.close()
 
 class ListObject(GObject.Object):
-    __gtype_name__ = "ListObject"
     def __init__(self, d=False, **kwargs):
         super().__init__()
         if d:
@@ -182,7 +196,7 @@ class ListObject(GObject.Object):
                 i.name2 = (i.nick or i.attr).lower().replace(" ", "_").replace("-", "_")
                 i.should_connect = hasattr(self.__class__, "changed") and hasattr(getattr(self.__class__, i.attr).fset, "__func__")
                 i.f = getattr(self, f"{i.attr}_from", False)
-                if i.value_type.name in ("gint", "gboolean"):
+                if i.value_type.name in ("gint", "gdouble", "gboolean"):
                     i.default = i.get_default_value()
         for i in self.__class__._props:
             if i.name2 in d:
@@ -203,7 +217,6 @@ class ListObject(GObject.Object):
         return v
 
 class List(Gio.ListStore):
-    __gtype_name__ = "List"
 
     item_class = GObject.Property(type=object)
     unique = GObject.Property(type=str)
@@ -357,7 +370,6 @@ class DBUS:
     def path(i): return "/" + i.replace(".", "/")
 
 class Autocomplete(Gtk.Popover):
-    __gtype_name__ = "Autocomplete"
     listview = GObject.Property(type=Gtk.ListView)
     model = GObject.Property(type=List)
     complete = GObject.Property(type=object)
@@ -501,7 +513,6 @@ class Autocomplete(Gtk.Popover):
         if self.row_activate_function: self.row_activate_function(self.get_parent(), self, l.get_model().get_item(n))
 
 class Window(Adw.ApplicationWindow):
-    __gtype_name__ = "UtilsWindow"
 
     @classproperty
     def current(*_): return next((i for i in Gtk.Window.list_toplevels() if hasattr(i, "get_application") and i.get_application() == App.default and isinstance(i, Window)), None)
@@ -510,12 +521,12 @@ class Window(Adw.ApplicationWindow):
         if "title" in kwargs:
             title = kwargs["title"]
         else:
-            title = App.default.about.get_application_name() if App.default and App.default.about else App.default.get_application_id().rsplit(".", 1)[-1] if App.default else self.__class__.__gtype_name__
+            title = App.default.about.get_application_name() if App.default and App.default.about else App.default.get_application_id().rsplit(".", 1)[-1] if App.default else self.__class__.__name__
         toast_overlay = Adw.ToastOverlay()
         super().__init__(css_name=kwargs["css_name"] if "css_name" in kwargs else "window", application=App.default, content=toast_overlay, title=title, height_request=1, width_request=1, default_width=100, default_height=100)
         if "content" in kwargs: self.set_content(kwargs["content"])
         self.add_css_class(self.get_title().lower().replace(" ", "-") + "-window")
-        self.add_css_class(self.__gtype_name__.lower())
+        self.add_css_class(self.__class__.__name__.lower())
         self.__class__.controller_init(self)
 
     def add_actions(self, *actions):
@@ -824,7 +835,6 @@ class PopupDialog(GObject.Object):
         return list(l)
 
 class BarChartBar(ListObject):
-    __gtype_name__ = "BarChartBar"
     title = GObject.Property(type=str)
     value = GObject.Property(type=int)
 
@@ -868,7 +878,6 @@ class BarChartBar(ListObject):
     factory.connect("teardown", teardown)
 
 class BarChart(Gtk.ListView):
-    __gtype_name__ = "BarChart"
     bars = GObject.Property(type=List, flags=GObject.ParamFlags.READWRITE | GObject.ParamFlags.CONSTRUCT_ONLY)
     max_value = GObject.Property(type=int)
 
@@ -887,7 +896,6 @@ class BarChart(Gtk.ListView):
             i.bindings = [self.bind_property("max-value", i, "max-value", SYNC_BIND), self.bind_property("height-request", i, "max-height", SYNC_BIND)]
 
 class CalendarHeatmapDay(ListObject):
-    __gtype_name__ = "CalendarHeatmapDay"
     type = GObject.Property(type=str)
     title = GObject.Property(type=str)
     value = GObject.Property(type=int)
@@ -938,7 +946,6 @@ class CalendarHeatmapDay(ListObject):
     factory.connect("teardown", teardown)
 
 class CalendarHeatmap(Gtk.GridView):
-    __gtype_name__ = "CalendarHeatmap"
 
     days = GObject.Property(type=List, flags=GObject.ParamFlags.READWRITE | GObject.ParamFlags.CONSTRUCT_ONLY)
     max_value = GObject.Property(type=int)
@@ -980,7 +987,6 @@ class CalendarHeatmap(Gtk.GridView):
         self.get_model().set_model(m)
 
 class RGBA(Gdk.RGBA):
-    __gtype_name__ = "RGBA"
     def __init__(self, s="#ffffff", validate=False):
         super().__init__()
         if isinstance(s, str):
@@ -1010,7 +1016,6 @@ class RGBA(Gdk.RGBA):
         return tuple(i for i in n)
 
 class DonutChart(Gtk.DrawingArea):
-    __gtype_name__ = "DonutChart"
     segments = GObject.Property(type=object)
     tooltips = GObject.Property(type=object)
     colors = GObject.Property(type=object)
@@ -1137,7 +1142,6 @@ class DonutChart(Gtk.DrawingArea):
         self.queue_draw()
 
 class DonutChartLegend(Gtk.Box):
-    __gtype_name__ = "DonutChartLegend"
     segments = GObject.Property(type=object)
     tooltips = GObject.Property(type=object)
     colors = GObject.Property(type=object)
@@ -1168,7 +1172,6 @@ class DonutChartLegend(Gtk.Box):
         cr.paint()
 
 class TimedButton(Gtk.Button):
-    __gtype_name__ = "TimedButton"
     rgba = GObject.Property(type=RGBA)
     seconds = GObject.Property(type=int, default=5, minimum=1)
     def __init__(self, callback=False, **kwargs):
@@ -1245,7 +1248,6 @@ class TimedButton(Gtk.Button):
         cr.fill()
 
 class MasonryColumn(Gtk.Box):
-    __gtype_name__ = "MasonryColumn"
     def __init__(self): super().__init__(orientation=Gtk.Orientation.VERTICAL, css_name="column", valign=Gtk.Align.START)
 
     def reorder(box, desired):
@@ -1259,7 +1261,6 @@ class MasonryColumn(Gtk.Box):
             previous = widget
 
 class Masonry(Gtk.ScrolledWindow):
-    __gtype_name__ = "Masonry"
     view = GObject.Property(type=Gtk.Box)
     children = GObject.Property(type=object)
     def __iter__(self):
@@ -1358,21 +1359,24 @@ class Masonry(Gtk.ScrolledWindow):
         return Gtk.ScrolledWindow.do_focus(self, d)
 
 class GroupsPage(Gtk.ScrolledWindow):
-    __gtype_name__ = "GroupsPage"
-
     def __init__(self): super().__init__(child=Gtk.Box(orientation=Gtk.Orientation.VERTICAL, css_classes=["groups"]))
 
-    def add(self, i): self.get_child().get_child().append(i)
+    def add(self, i):
+        if isinstance(i, Gtk.ListBoxRow):
+            group = self.get_group(-1)
+            if not group:
+                group = Adw.PreferencesGroup()
+                self.add(group)
+            group.add(i)
+        else: self.get_child().get_child().append(i)
 
     def get_group(self, n=0):
         groups = [i for i in self.get_child().get_child()]
-        return groups[n] if len(groups) > n else None
+        return groups[n] if groups and len(groups) > n else None
 
     def remove(self, i): self.get_child().get_child().remove(i)
 
 class Prompt(Adw.AlertDialog):
-    __gtype_name__ = "Prompt"
-
     def __init__(self, callback=None, responses=("cancel", "confirm"), appearance=Adw.ResponseAppearance.SUGGESTED, confirm_callback=True, **kwargs):
         self.callback = callback
         self.responses = responses
@@ -1387,8 +1391,6 @@ class Prompt(Adw.AlertDialog):
         if r == d.responses[-1]: d.callback(d)
 
 class EntryPrompt(Prompt):
-    __gtype_name__ = "EntryPrompt"
-
     def __init__(self, callback=None, multiline=False, appearance=Adw.ResponseAppearance.SUGGESTED, password=False, **kwargs):
         extra_child = Gtk.PasswordEntry(placeholder_text="Password", show_peek_icon=True) if password else Gtk.TextView() if multiline else Gtk.Entry()
         if not multiline: extra_child.connect("activate", self.__class__.activate)
@@ -1418,7 +1420,6 @@ class EntryPrompt(Prompt):
         e.get_ancestor(Adw.Dialog).close()
 
 class LabelRow(Adw.ActionRow):
-    __gtype_name__ = "LabelRow"
     label = GObject.Property(type=str)
     def __init__(self, title="", subtitle="", label="", **kwargs):
         super().__init__(overflow=Gtk.Overflow.HIDDEN, title=title, subtitle=subtitle)
@@ -1431,8 +1432,6 @@ class LabelRow(Adw.ActionRow):
         self.bind_property("label", label, "label", DEFAULT_BIND)
 
 class DateRow(Adw.ActionRow):
-    __gtype_name__ = "DateRow"
-
     date = GObject.Property(type=GLib.DateTime)
 
     def __init__(self, **kwargs):
@@ -1494,7 +1493,6 @@ class DateRow(Adw.ActionRow):
         self.date = d
 
 class Tag(Gtk.Button):
-    __gtype_name__ = "Tag"
     tag = GObject.Property(type=str)
     def __init__(self, tagrow=None, tag="", close=True, css_name="tag"):
         box = Gtk.Box()
@@ -1528,8 +1526,6 @@ class Tag(Gtk.Button):
         self.set_property("tags", [i.tag for i in self.wrapbox if isinstance(i, Tag) and not i == tag])
 
 class TagRow(Adw.PreferencesRow):
-    __gtype_name__ = "TagRow"
-
     @GObject.Property(type=GObject.Strv)
     def tags(self): return getattr(self, "_tags", [])
 
@@ -1658,7 +1654,6 @@ class TagRow(Adw.PreferencesRow):
         return False
 
 class MenuFontRow(Gtk.Box):
-    __gtype_name__ = "MenuFontRow"
     def __init__(self, label, name):
         name = name.replace("-", "_")
         super().__init__(css_name="menufontrow", name=name)
@@ -1666,7 +1661,6 @@ class MenuFontRow(Gtk.Box):
         self.append(Gtk.FontDialogButton(dialog=Gtk.FontDialog(modal=False), hexpand=True, halign=Gtk.Align.END))
 
 class MenuColorRow(Gtk.Box):
-    __gtype_name__ = "MenuColorRow"
     def __init__(self, label, name):
         name = name.replace("-", "_")
         super().__init__(css_name="menucolorrow", name=name)
@@ -1674,7 +1668,6 @@ class MenuColorRow(Gtk.Box):
         self.append(Gtk.ColorDialogButton(dialog=Gtk.ColorDialog(modal=False), hexpand=True, valign=Gtk.Align.CENTER, halign=Gtk.Align.END))
 
 class MenuSpinRow(Gtk.Box):
-    __gtype_name__ = "MenuSpinRow"
     def __init__(self, parent, label, name, value=0, step_increment=1):
         name = name.replace("-", "_")
         super().__init__(css_name="menuspinrow", name=name)
@@ -1684,7 +1677,6 @@ class MenuSpinRow(Gtk.Box):
         parent.bind_property(prop.name, self.get_last_child(), "value", SYNC_BIND)
 
 class TextRow(Adw.PreferencesRow):
-    __gtype_name__ = "TextRow"
     text = GObject.Property(type=str)
     text_widget = GObject.Property(type=Gtk.TextView)
     def __init__(self, title=""):
@@ -1713,7 +1705,6 @@ class TextRow(Adw.PreferencesRow):
         (self.add_css_class if self.text_widget.get_property("has-focus") else self.remove_css_class)("focused")
 
 class URIRow(Adw.PreferencesRow):
-    __gtype_name__ = "URIRow"
     text = GObject.Property(type=str)
     text_widget = GObject.Property(type=Gtk.Widget)
     placeholder = GObject.Property(type=Gtk.Label)
@@ -1779,7 +1770,6 @@ class URIRow(Adw.PreferencesRow):
         self.button.set_visible(not self.get_text() or not self.text_widget.get_property("has-focus"))
 
 class ToggleGroupRow(Adw.ActionRow):
-    __gtype_name__ = "ToggleGroupRow"
     togglegroup = GObject.Property(type=Adw.ToggleGroup)
     active = GObject.Property(type=str)
     def __init__(self, toggles=None, **kwargs):
@@ -1792,7 +1782,6 @@ class ToggleGroupRow(Adw.ActionRow):
         self.add_suffix(self.togglegroup)
 
 class ScaleRow(Adw.ActionRow):
-    __gtype_name__ = "ScaleRow"
     value = GObject.Property(type=float)
     def __init__(self, minimum=0, maximum=100, step=1, **kwargs):
         super().__init__(overflow=Gtk.Overflow.HIDDEN, **kwargs)
@@ -1803,7 +1792,6 @@ class ScaleRow(Adw.ActionRow):
         self.bind_property("value", scale.get_adjustment(), "value", SYNC_BIND)
 
 class ColorRow(Adw.ActionRow):
-    __gtype_name__ = "ColorRow"
     button = GObject.Property(type=Gtk.ColorDialogButton)
     rgba = GObject.Property(type=Gdk.RGBA)
     with_alpha = GObject.Property(type=bool, default=True)
@@ -1821,7 +1809,6 @@ class ColorRow(Adw.ActionRow):
         self.add_suffix(self.button)
 
 class FontRow(Adw.ActionRow):
-    __gtype_name__ = "FontRow"
     font_desc = GObject.Property(type=Pango.FontDescription)
     def __init__(self, title="", subtitle="", label="", font_desc="", button_kwargs=None, dialog_kwargs=None, **kwargs):
         if not dialog_kwargs:
@@ -1840,7 +1827,6 @@ class FontRow(Adw.ActionRow):
     def set_font_desc(self, v): setattr(self, "font_desc", v)
 
 class Picture(Gtk.Widget, Gtk.Scrollable):
-    __gtype_name__ = "Picture"
     animation = GObject.Property(type=Adw.TimedAnimation)
     best_fit = GObject.Property(type=bool, default=True)
     hscroll_policy, vscroll_policy = GObject.Property(type=Gtk.ScrollablePolicy, default=Gtk.ScrollablePolicy.MINIMUM), GObject.Property(type=Gtk.ScrollablePolicy, default=Gtk.ScrollablePolicy.MINIMUM)
@@ -1898,7 +1884,7 @@ class Picture(Gtk.Widget, Gtk.Scrollable):
         drag.connect("drag-end", self.__class__.drag_end)
         e = Gtk.EventControllerKey()
         e.connect("key-pressed", self.__class__.on_key_pressed)
-        super().__init__(css_name=self.__gtype_name__.lower(), focusable=True, overflow=Gtk.Overflow.HIDDEN, hexpand=True, vexpand=True, **kwargs)
+        super().__init__(css_name=self.__class__.__name__.lower(), focusable=True, overflow=Gtk.Overflow.HIDDEN, hexpand=True, vexpand=True, **kwargs)
         for i in (e, motion, scroll, drag): self.add_controller(i)
         self.animation = Adw.TimedAnimation(widget=self, duration=200, target=Adw.PropertyAnimationTarget.new(self, "zoom"))
         self.animation.connect("done", self.__class__.reset_mouse_target)
@@ -2032,8 +2018,6 @@ class Picture(Gtk.Widget, Gtk.Scrollable):
     def adjustment_value_changed(_, self): self.queue_draw()
 
 class MediaStream(GObject.Object, Gdk.Paintable):
-    __gtype_name__ = "UtilsMediaStream"
-
     uri = GObject.Property(type=str)
     paintable = GObject.Property(type=Gdk.Paintable)
     pipeline = GObject.Property(type=GObject.Object)
@@ -2440,11 +2424,9 @@ class MediaStream(GObject.Object, Gdk.Paintable):
         if self.paintable: self.paintable.snapshot(s, w, h)
 
 class LoopButton(Gtk.ToggleButton):
-    __gtype_name__ = "LoopButton"
-
     def __init__(self, media=None, **kwargs):
         super().__init__(tooltip_text="Loop", icon_name="media-playlist-repeat", **kwargs)
-        self.add_css_class(self.__gtype_name__.lower())
+        self.add_css_class(self.__class__.__name__.lower())
         self.add_css_class("flat")
         self.add_css_class("circular")
         self.bindings = []
@@ -2456,14 +2438,13 @@ class LoopButton(Gtk.ToggleButton):
             self.bindings = [media.bind_property("loop", self, "active", SYNC_BIND)]
 
 class VolumeButton(Gtk.MenuButton):
-    __gtype_name__ = "VolumeButton"
     value = GObject.Property(type=float, minimum=0.0, default=0.5, maximum=1.0)
     def __init__(self, media=None, **kwargs):
         scale = Gtk.Scale(draw_value=True, digits=2, height_request=200, inverted=True, orientation=Gtk.Orientation.VERTICAL, halign=Gtk.Align.CENTER)
         for i in (0.25, 0.5, 0.75): scale.add_mark(i, Gtk.PositionType.TOP)
         scale.set_range(0.0, 1.0)
         super().__init__(tooltip_text="Volume", popover=Gtk.Popover(child=scale), **kwargs)
-        self.add_css_class(self.__gtype_name__.lower())
+        self.add_css_class(self.__class__.__name__.lower())
         self.add_css_class("flat")
         self.add_css_class("circular")
         self.bindings = []
@@ -2478,14 +2459,12 @@ class VolumeButton(Gtk.MenuButton):
     def icon_bind(b, v): return "audio-volume-muted-symbolic" if v == 0 else "audio-volume-high-symbolic" if v >= 0.6 else "audio-volume-medium-symbolic"
 
 class SpeedButton(Gtk.MenuButton):
-    __gtype_name__ = "SpeedButton"
-
     def __init__(self, media=None, **kwargs):
         scale = Gtk.Scale(draw_value=True, digits=2, height_request=200, inverted=True, orientation=Gtk.Orientation.VERTICAL, halign=Gtk.Align.CENTER)
         for i in (0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75): scale.add_mark(i, Gtk.PositionType.TOP)
         scale.set_range(-0.1, 2.0)
         super().__init__(tooltip_text="Speed", popover=Gtk.Popover(child=scale), **kwargs)
-        self.add_css_class(self.__gtype_name__.lower())
+        self.add_css_class(self.__class__.__name__.lower())
         self.add_css_class("flat")
         self.add_css_class("circular")
         self.bindings = []
@@ -2502,11 +2481,9 @@ class SpeedButton(Gtk.MenuButton):
         return "speedometer-medium-symbolic" if v == 1 else "speedometer-low-symbolic" if 1 > v else "speedometer-high-symbolic"
 
 class MediaSeekbar(Gtk.Scale):
-    __gtype_name__ = "MediaSeekbar"
-
     def __init__(self, media=None, **kwargs):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, valign=Gtk.Align.CENTER, **kwargs)
-        self.add_css_class(self.__gtype_name__.lower())
+        self.add_css_class(self.__class__.__name__.lower())
         self.connect("change-value", self.__class__.change_value)
         self.bindings = []
         self.bind_media(media)
@@ -2535,13 +2512,11 @@ class MediaSeekbar(Gtk.Scale):
         if self.get_tooltip_text() != v: self.set_tooltip_text(v)
 
 class PlaybackButton(Gtk.Button):
-    __gtype_name__ = "PlaybackButton"
-
     def __init__(self, media=None, **kwargs):
         if not "tooltip_text" in kwargs:
             kwargs["tooltip_text"] = "Pause" if media and media.playing else "Play"
         super().__init__(**kwargs)
-        self.add_css_class(self.__gtype_name__.lower())
+        self.add_css_class(self.__class__.__name__.lower())
         self.add_css_class("flat")
         self.add_css_class("circular")
         self.connect("clicked", self.__class__.callback)
@@ -2567,7 +2542,6 @@ class PlaybackButton(Gtk.Button):
     def playing_bind2(b, v): return "Pause" if v else "Play"
 
 class MediaControls(Gtk.Box):
-    __gtype_name__ = "MediaControls"
     loop_button = GObject.Property(type=LoopButton)
     volume_button = GObject.Property(type=VolumeButton)
     playback_button = GObject.Property(type=PlaybackButton)
@@ -2584,7 +2558,7 @@ class MediaControls(Gtk.Box):
     }
 
     def __init__(self, **kwargs):
-        super().__init__(css_name=self.__gtype_name__.lower(), focusable=True, **kwargs)
+        super().__init__(css_name=self.__class__.__name__.lower(), focusable=True, **kwargs)
         e = Gtk.EventControllerKey()
         e.connect("key-pressed", self.__class__.on_key_pressed)
         self.add_controller(e)
@@ -2630,14 +2604,13 @@ class MediaControls(Gtk.Box):
     def duration_bind(b, v): return v > 0
 
 class Media(Gtk.Overlay):
-    __gtype_name__ = "Media"
     picture = GObject.Property(type=Gtk.Widget)
     controls = GObject.Property(type=MediaControls)
     scrolled_window = GObject.Property(type=Gtk.ScrolledWindow)
     media_stream = GObject.Property(type=Gdk.Paintable)
 
     def __init__(self, zoom=False, **kwargs):
-        super().__init__(child=Gtk.GraphicsOffload(), css_name=self.__gtype_name__.lower(), **kwargs)
+        super().__init__(child=Gtk.GraphicsOffload(), css_name=self.__class__.__name__.lower(), **kwargs)
         if zoom:
             self.picture = Picture()
             self.scrolled_window = Gtk.ScrolledWindow(child=self.picture)
@@ -2733,8 +2706,6 @@ class CSS(Gtk.CssProvider):
     def dark_bind(b, v): Gtk.InterfaceColorScheme.DARK if v else Gtk.InterfaceColorScheme.LIGHT
 
 class App(Adw.Application):
-    __gtype_name__ = "UtilsApp"
-
     @classproperty
     def default(*_): return Adw.Application.get_default()
 
@@ -2892,7 +2863,9 @@ class App(Adw.Application):
         self = self or App.default
         if not self: return "No App"
         if css:
-            self.css = css
+            if not self.css:
+                self.css = ""
+            self.css += css
         self.run(ARGS)
 
 App.UTILS_CSS = ""
@@ -2921,8 +2894,6 @@ class Menu(Gio.Menu):
         return self
 
 class PaintableTask(GObject.Object):
-    __gtype_name__ = "PaintableTask"
-
     headers = GObject.Property(type=object)
     func = GObject.Property(type=object)
     data = GObject.Property(type=object)
@@ -3961,6 +3932,7 @@ def int_bind(b, v): return int(v)
 def str_bind(b, v): return str(v)
 def invert_bool_bind(b, v): return not bool(v)
 def invert_unpack_bind(b, v): return not v.unpack()
+def font_bind(b, v): return v.to_string() if hasattr(v, "to_string") else Pango.FontDescription.from_string(v if isinstance(v, str) else None)
 def selected_bind(b, v):
     target = b.get_property("target")
     model = target if isinstance(target, Gio.ListModel) else target.get_model() if hasattr(target, "get_model") else False
@@ -4047,7 +4019,6 @@ def do_gst():
         Gst = False
 
 class Log(Adw.Window):
-    __gtype_name__ = "Log"
     instance = None
     box = GObject.Property(type=object)
     opened = GObject.Property(type=bool, default=False)
@@ -4057,7 +4028,7 @@ class Log(Adw.Window):
     def __init__(self):
         super().__init__(hide_on_close=True, visible=False, title="Log", default_width=360, default_height=364, content=Adw.ToastOverlay())
         self.actions = Gio.SimpleActionGroup()
-        self.insert_action_group(self.__gtype_name__.lower(), self.actions)
+        self.insert_action_group(self.__class__.__name__.lower(), self.actions)
         self.time = Button(t=Gtk.ToggleButton, tooltip_text="Time", icon_name="preferences-system-time")
         Window.controller_init(self)
         self.__class__.instance = self
@@ -4071,7 +4042,7 @@ class Log(Adw.Window):
         toolbar = Adw.ToolbarView(vexpand=True, content=overlay)
         overlay.add_overlay(empty)
         header = Adw.HeaderBar()
-        d = dict((i, self.__gtype_name__.lower() + "." + i.lower().replace(" ", "-")) for i in ("Toast", "Online", "Task", "Palette", "MediaStream", "PaintableTask"))
+        d = dict((i, self.__class__.__name__.lower() + "." + i.lower().replace(" ", "-")) for i in ("Toast", "Online", "Task", "Palette", "MediaStream", "PaintableTask"))
         m = Menu(d)
         f = get_variant(False)
         for i in d: self.add_action(Gio.SimpleAction.new_stateful(i.lower().replace(" ", "-"), None, f))
@@ -4182,7 +4153,6 @@ class Log(Adw.Window):
 
 if not hasattr(Adw, "ToggleGroup"):
     class Toggle(GObject.Object):
-        __gtype_name__ = "Toggle"
         child = GObject.Property(type=Gtk.Widget)
         description = GObject.Property(type=str)
         enabled = GObject.Property(type=bool, default=True)
@@ -4234,8 +4204,6 @@ if not hasattr(Adw, "ToggleGroup"):
             Task.invoke(group.set_active, [i for i in group.get_toggles()].index(self))
 
     class ToggleGroup(Gtk.Box):
-        __gtype_name__ = "ToggleGroup"
-
         @GObject.Property(type=float)
         def active(self): return getattr(self, "_active", Gtk.INVALID_LIST_POSITION)
 
@@ -4300,7 +4268,6 @@ if not hasattr(Adw, "ToggleGroup"):
     Adw.ToggleGroup = ToggleGroup
 
     class InlineViewSwitcher(Adw.Bin):
-        __gtype_name__ = "InlineViewSwitcher"
         display_mode = GObject.Property(type=int)
 
         @GObject.Property(type=Adw.ViewStack)
