@@ -3232,7 +3232,7 @@ class Online:
     def has_init(): return hasattr(Online, "Cookies")
 
     @staticmethod
-    def Request(url, headers=None):
+    def Request(url, headers=None, cancellable=None):
         headers = headers or {}
         if not Online.has_init() and not Online.init(): return
         he = {"Referer": url}
@@ -3248,7 +3248,7 @@ class Online:
             if h.get_one(k): h.replace(k, v)
             else: h.append(k, v)
         if Log.online: print("Fetching:", message.get_uri().to_string(), "Headers:", he)
-        try: return Online.get_data(Online.Session.send_and_read(message))
+        try: return Online.get_data(Online.Session.send_and_read(message, cancellable))
         except Exception as e: print(e)
 
     @staticmethod
@@ -3266,7 +3266,7 @@ class Online:
             return e.d
 
     @staticmethod
-    def MultipartRequest(url, headers=None, fields=None, files=None):
+    def MultipartRequest(url, headers=None, fields=None, files=None, cancellable=None):
         headers = headers or {}
         fields = fields or {}
         files = files or {}
@@ -3283,7 +3283,7 @@ class Online:
             if h.get_one(k): h.replace(k, v)
             else: h.append(k, v)
         if Log.online: print("Fetching:", message.get_uri().to_string(), "Headers:", he)
-        try: return Online.get_data(Online.Session.send_and_read(message))
+        try: return Online.get_data(Online.Session.send_and_read(message, cancellable))
         except Exception as e: print(e)
 
     @staticmethod
