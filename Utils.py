@@ -360,7 +360,8 @@ class DBUS:
             self.bus = App.default.get_dbus_connection()
             if self.bus: Gio.bus_own_name_on_connection(self.bus, self.name, Gio.BusNameOwnerFlags.NONE)
         if self.bus:
-            for i in Gio.DBusNodeInfo.new_for_xml(self.xml).interfaces: self.bus.register_object_with_closures2(self.register, i, self.do_call)
+            self.node_info = Gio.DBusNodeInfo.new_for_xml(self.xml)
+            for i in self.node_info.interfaces: self.bus.register_object_with_closures2(self.register, i, self.do_call)
         else: print(self.name, "no BUS")
 
     def do_call(self, *args):
