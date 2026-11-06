@@ -3934,6 +3934,7 @@ def unpack_bind(b, v): return v.unpack()
 def bool_bind(b, v): return bool(v)
 def int_bind(b, v): return int(v)
 def str_bind(b, v): return str(v)
+def string_bind(b, v): return v.get_string() if hasattr(v, "get_string") else ""
 def invert_bool_bind(b, v): return not bool(v)
 def invert_unpack_bind(b, v): return not v.unpack()
 def font_bind(b, v): return v.to_string() if hasattr(v, "to_string") else Pango.FontDescription.from_string(v if isinstance(v, str) else None)
