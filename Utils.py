@@ -2757,9 +2757,10 @@ class App(Adw.Application):
             if not FLATPAK_ID:
                 flatpak_data = Path(HOME, ".var", "app", self.get_application_id(), "data")
                 self.data_folder = Gio.File.new_for_path(flatpak_data) if exists(flatpak_data) else self.data_folder.get_child(info["Name"])
-            if about and shortcuts:
-                self.add_actions(("about", self.__class__.default_show_about), ("shortcuts", self.__class__.default_show_shortcuts, "<primary>question"))
-            if about: self.about = Adw.AboutDialog(application_name=info["Name"], issue_url=info["Issue URL"], website=info["Website"], application_icon=info["ID"], license_type=info["License"], developer_name=info["Developer"], version=info["Version"], release_notes=info["Release Notes"][-1][-1])
+            if about: self.add_actions(("about", self.__class__.default_show_about))
+            if shortcuts: self.add_actions(("shortcuts", self.__class__.default_show_shortcuts, "<primary>question"))
+            if about:
+                self.about = Adw.AboutDialog(application_name=info["Name"], issue_url=info["Issue URL"], website=info["Website"], application_icon=info["ID"], license_type=info["License"], developer_name=info["Developer"], version=info["Version"], release_notes=info["Release Notes"][-1][-1])
             if shortcuts:
                 self.shortcuts = Adw.ShortcutsDialog() if hasattr(Adw, "ShortcutsDialog") else Gtk.ShortcutsWindow()
                 if not hasattr(self.shortcuts, "add"):
@@ -2782,6 +2783,8 @@ class App(Adw.Application):
                         s.add_group(section)
             if about and shortcuts:
                 self.default_menu = Menu({"Keyboard Shortcuts": "shortcuts", f"About {self.about.get_application_name()}": "about"})
+            elif about:
+                self.default_menu = Menu({f"About {self.about.get_application_name()}": "about"})
         if data:
             if "CREATE TABLE IF NOT EXISTS Windows" in data and not window_removed:
                 window_removed = self.__class__.persist_windows_window_removed
@@ -2848,7 +2851,7 @@ class App(Adw.Application):
     @staticmethod
     def default_show_about(*_):
         if App.default.about.get_mapped(): App.default.about.close()
-        App.default.about.present(Window.current)
+        App.default.about.present(Window.current if Window.current and Window.current.get_visible() and Window.current.get_mapped() else None)
 
     @staticmethod
     def default_show_shortcuts(*_):
