@@ -2442,6 +2442,7 @@ class VolumeButton(Gtk.MenuButton):
     value = GObject.Property(type=float, minimum=0.0, default=0.5, maximum=1.0)
     def __init__(self, media=None, **kwargs):
         scale = Gtk.Scale(draw_value=True, digits=2, height_request=200, inverted=True, orientation=Gtk.Orientation.VERTICAL, halign=Gtk.Align.CENTER)
+        scale.set_format_value_func(self.__class__.format_func)
         for i in (0.25, 0.5, 0.75): scale.add_mark(i, Gtk.PositionType.TOP)
         scale.set_range(0.0, 1.0)
         super().__init__(tooltip_text="Volume", popover=Gtk.Popover(child=scale), **kwargs)
@@ -2450,6 +2451,9 @@ class VolumeButton(Gtk.MenuButton):
         self.add_css_class("circular")
         self.bindings = []
         self.bind_media(media)
+
+    @staticmethod
+    def format_func(scale, v): return f"{v * 100:.0f}%"
 
     def bind_media(self, media):
         for i in self.bindings: i.unbind()
