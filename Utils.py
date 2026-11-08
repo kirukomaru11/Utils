@@ -3539,7 +3539,7 @@ class ToolbarFullscreen:
     def __init__(self, w, default=False):
         w.fullscreen = default
         for i in w:
-            if isinstance(i, Gtk.Revealer):
+            if any(it in ("top-bar", "bottom-bar") for it in i.get_css_classes()):
                 i.set_property("height-request", 2)
                 e = Gtk.EventControllerMotion(propagation_limit=Gtk.PropagationLimit.NONE, propagation_phase=Gtk.PropagationPhase.CAPTURE)
                 e.connect("notify::contains-pointer", self.__class__.revealer_contains)
@@ -3551,8 +3551,10 @@ class ToolbarFullscreen:
     def revealer_contains(e, p=None):
         r = e.get_widget()
         t = r.get_ancestor(Adw.ToolbarView)
-        if not t.fullscreen: return
-        (t.set_reveal_top_bars if "top-bar" in r.get_css_classes() else t.set_reveal_bottom_bars)(e.get_property("contains-pointer"))
+        v = e.get_property("contains-pointer")
+        if not v and t.get_root() and t.get_root().get_focus():
+            v = t.get_root().get_focus().is_ancestor(r)
+        (t.set_reveal_top_bars if "top-bar" in r.get_css_classes() else t.set_reveal_bottom_bars)(v)
 
     @staticmethod
     def fu(t):
