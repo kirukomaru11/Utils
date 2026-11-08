@@ -3550,9 +3550,10 @@ class ToolbarFullscreen:
     @staticmethod
     def revealer_contains(e, p=None):
         r = e.get_widget()
+        if not r.get_root() or not "toolbar-fullscreen" in r.get_root().get_css_classes(): return
         t = r.get_ancestor(Adw.ToolbarView)
         v = e.get_property("contains-pointer")
-        if not v and t.get_root() and t.get_root().get_focus():
+        if not v and t.get_root().get_focus():
             v = t.get_root().get_focus().is_ancestor(r)
         (t.set_reveal_top_bars if "top-bar" in r.get_css_classes() else t.set_reveal_bottom_bars)(v)
 
