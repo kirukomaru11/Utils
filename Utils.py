@@ -1554,7 +1554,7 @@ class TagRow(Adw.PreferencesRow):
         self.prompt = EntryPrompt(self.__class__.prompt_activate, heading=f"New {tag or title.rstrip('s')}")
         self.prompt.tagrow = self
         self.button, self.wrapbox = Button(overflow=Gtk.Overflow.HIDDEN, callback=self.__class__.button_activate, css_classes=("flat",), child=Gtk.Box(halign=Gtk.Align.CENTER)), Adw.WrapBox(child_spacing=4, line_spacing=4)
-        self.wrapbox.tag = Gtk.Label(css_name="dragtag")
+        self.wrapbox.tag = Gtk.Label(css_name="drag-tag")
         self.button.get_child().append(Gtk.Image(icon_name="list-add-symbolic"))
         self.button.get_child().append(Gtk.Label(css_classes=("heading",), label=f"Add {title}"))
         d = Gtk.DragSource(actions=Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
@@ -1600,7 +1600,7 @@ class TagRow(Adw.PreferencesRow):
 
     @staticmethod
     def drag_begin(e, d):
-        if e.get_widget().tag: Gtk.DragIcon.get_for_drag(d).set_child(Tag(tag=e.get_widget().tag.tag, close=False, css_name="dragtag"))
+        if e.get_widget().tag: Gtk.DragIcon.get_for_drag(d).set_child(Tag(tag=e.get_widget().tag.tag, close=False, css_name="drag-tag"))
 
     @staticmethod
     def drag_end(e, d=None, de=None):
@@ -1657,21 +1657,21 @@ class TagRow(Adw.PreferencesRow):
 class MenuFontRow(Gtk.Box):
     def __init__(self, label, name):
         name = name.replace("-", "_")
-        super().__init__(css_name="menufontrow", name=name)
+        super().__init__(css_name="menu-font-row", name=name)
         self.append(Gtk.Label(label=label))
         self.append(Gtk.FontDialogButton(dialog=Gtk.FontDialog(modal=False), hexpand=True, halign=Gtk.Align.END))
 
 class MenuColorRow(Gtk.Box):
     def __init__(self, label, name):
         name = name.replace("-", "_")
-        super().__init__(css_name="menucolorrow", name=name)
+        super().__init__(css_name="menu-color-row", name=name)
         self.append(Gtk.Label(label=label))
         self.append(Gtk.ColorDialogButton(dialog=Gtk.ColorDialog(modal=False), hexpand=True, valign=Gtk.Align.CENTER, halign=Gtk.Align.END))
 
 class MenuSpinRow(Gtk.Box):
     def __init__(self, parent, label, name, value=0, step_increment=1):
         name = name.replace("-", "_")
-        super().__init__(css_name="menuspinrow", name=name)
+        super().__init__(css_name="menu-spin-row", name=name)
         self.append(Gtk.Label(label=label))
         prop = parent.__class__.find_property(name)
         self.append(Gtk.SpinButton(digits=len(str(prop.default_value)) - 1 if isinstance(prop.default_value, float) else 1, halign=Gtk.Align.END, hexpand=True, adjustment=Gtk.Adjustment.new(prop.default_value, prop.minimum, prop.maximum, step_increment, 0, 0)))
@@ -2563,7 +2563,7 @@ class MediaControls(Gtk.Box):
     }
 
     def __init__(self, **kwargs):
-        super().__init__(css_name=self.__class__.__name__.lower(), focusable=True, **kwargs)
+        super().__init__(css_name="media-controls", focusable=True, **kwargs)
         e = Gtk.EventControllerKey()
         e.connect("key-pressed", self.__class__.on_key_pressed)
         self.add_controller(e)
@@ -2672,13 +2672,13 @@ class Media(Gtk.Overlay):
         if (isinstance(self.media_stream, MediaStream) and self.media_stream.paintable) or self.media_stream and not isinstance(self.media_stream, MediaStream):
             self.picture.set_property("paintable", self.media_stream)
             if self.controls:
-                self.controls.set_valign(Gtk.Align.END)
-                self.controls.set_vexpand(True)
+                self.controls.set_properties(valign=Gtk.Align.END, vexpand=True)
+                self.controls.add_css_class("dark-blur-background")
                 self.add_overlay(self.controls)
             off.set_child(child)
         elif self.controls:
-            self.controls.set_valign(Gtk.Align.CENTER)
-            self.controls.set_vexpand(False)
+            self.controls.set_properties(valign=Gtk.Align.CENTER, vexpand=False)
+            self.controls.remove_css_class("dark-blur-background")
             off.set_child(self.controls)
 
     @staticmethod
@@ -3338,7 +3338,7 @@ class Online:
         view = WebKit.WebView(web_context=context, settings=settings, network_session=Online.NetworkSession)
         w = PopupDialog(content=Adw.ToolbarView(extend_content_to_top_edge=True, content=view), title=uri, content_width=800, content_height=800)
         w.view = view
-        w.get_content().add_css_class("fullscreen")
+        w.get_content().add_css_class("dark-blur-background")
         h = Adw.HeaderBar()
         h.pack_end(PopupDialogButton())
         w.get_content().add_top_bar(h)
@@ -3557,7 +3557,8 @@ class ToolbarFullscreen:
     @staticmethod
     def fu(t):
         t.fullscreen = True
-        t.add_css_class("fullscreen")
+        for i in t:
+            if any(it in ("top-bar", "bottom-bar") for it in i.get_css_classes()): i.add_css_class("dark-blur-background")
         if t.get_root(): t.get_root().add_css_class("toolbar-fullscreen")
         t.set_extend_content_to_top_edge(True)
         t.set_extend_content_to_bottom_edge(True)
@@ -3567,7 +3568,8 @@ class ToolbarFullscreen:
     @staticmethod
     def un(t):
         t.fullscreen = False
-        t.remove_css_class("fullscreen")
+        for i in t:
+            if any(it in ("top-bar", "bottom-bar") for it in i.get_css_classes()): i.remove_css_class("dark-blur-background")
         if t.get_root(): t.get_root().remove_css_class("toolbar-fullscreen")
         t.set_extend_content_to_top_edge(False)
         t.set_extend_content_to_bottom_edge(False)
@@ -4360,8 +4362,6 @@ if not hasattr(Adw, "ToggleGroup"):
 
 App.UTILS_CSS += """
 :root { --color-1: var(--window-bg-color); --color-2: var(--window-bg-color); --color-3: var(--window-bg-color); }
-toolbarview.fullscreen .top-bar > windowhandle > box,
-toolbarview.fullscreen .bottom-bar > windowhandle > box { background: color-mix(in srgb, #222226 35%, transparent); color: white; }
 masonry view { border-spacing: 10px; margin: 10px; }
 masonry view > column { border-spacing: 10px; }
 .entry-prompt entry text { margin: 12px 5px 12px 5px; }
@@ -4370,17 +4370,19 @@ masonry view > column { border-spacing: 10px; }
 .entry-prompt .message-area  { border-spacing: 16px; }
 media picture, masonry media, masonry picture { border-radius: 13px; }
 
-mediacontrols { border-radius: 10px; margin: 6px; padding: 6px; background: var(--card-bg-color); border-spacing: 6px; }
-mediacontrols > scale { padding: 6px 0px; }
-media > mediacontrols { opacity: 0; transition: opacity 0.5s; color: white; background: color-mix(in srgb, #222226 35%, transparent); }
+media-controls { border-radius: 10px; margin: 6px; padding: 6px; background: var(--card-bg-color); border-spacing: 6px; }
+media-controls > scale { padding: 6px 0px; }
+media > media-controls.dark-blur-background { opacity: 0; transition: opacity 0.5s; }
+media > media-controls.dark-blur-background:hover { opacity: 1; }
 
-toolbarview.fullscreen .top-bar > windowhandle > box,
-toolbarview.fullscreen .bottom-bar > windowhandle > box,
-media > mediacontrols { backdrop-filter: blur(20px) brightness(0.9); }
+.blur-background { color: white; backdrop-filter: blur(20px) brightness(0.6); }
+@media (prefers-color-scheme: dark) {
+    .blur-background { backdrop-filter: blur(20px) brightness(0.9); }
+}
 
-media > mediacontrols:hover { opacity: 1; }
+.dark-blur-background { color:white; backdrop-filter: blur(20px) brightness(0.6); }
 
-dragtag { background: color-mix(in srgb, var(--window-fg-color) 20%, transparent); color: inherit; border-radius: 99px; padding: 6px 12px 6px 12px; }
+drag-tag { background: color-mix(in srgb, var(--window-fg-color) 20%, transparent); color: inherit; border-radius: 99px; padding: 6px 12px 6px 12px; }
 row.tags:only-child > button { border-radius: 12px; }
 row.tags:first-child > button { border-radius: 12px 12px 0px 0px; }
 row.tags:last-child > button { border-radius: 0px 0px 12px 12px; }
@@ -4414,13 +4416,13 @@ row.text placeholder { transition: all 0.2s; opacity: var(--dim-opacity); }
 row.text.has-text placeholder,
 row.text.focused placeholder { opacity: 0; }
 
-menuspinrow { padding: 0px 3px 0px 12px; }
-menuspinrow spinbutton { background: none; }
-menuspinrow spinbutton button { border: none; }
-menucolorrow,
-menufontrow { padding: 0px 2px 0px 12px; }
-menucolorrow button,
-menufontrow button { background: none; }
+menu-spin-row { padding: 0px 3px 0px 12px; }
+menu-spin-row spinbutton { background: none; }
+menu-spin-row spinbutton button { border: none; }
+menu-color-row,
+menu-font-row { padding: 0px 2px 0px 12px; }
+menu-color-row button,
+menu-font-row button { background: none; }
 
 .log time,
 .log message { font-size: 18px; padding-left: 8px; }
