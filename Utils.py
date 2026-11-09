@@ -216,6 +216,37 @@ class ListObject(GObject.Object):
             v[n] = getattr(self, attr)
         return v
 
+class ListItem(Adw.Bin):
+    item = GObject.Property(type=GObject.Object)
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if not hasattr(cls, "factory"):
+            factory = cls.factory = Gtk.SignalListItemFactory.new()
+            def setup(f, l): l.set_child(cls())
+            def bind(f, l):
+                if not l.get_child(): return
+                l.get_child().item = l.get_property("item")
+                Task.invoke(l.get_child().get_parent().set_properties, css_classes=[], focusable=False)
+            def unbind(f, l):
+                l.get_child().item = None
+            def teardown(f, l): l.set_child(None)
+            factory.connect("setup", setup)
+            factory.connect("bind", bind)
+            factory.connect("unbind", unbind)
+            factory.connect("teardown", teardown)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.bindings = []
+        self.connect("notify::item", self.__class__.item_changed)
+
+    @staticmethod
+    def item_changed(self, p=None):
+        for i in getattr(self, "bindings", []): i.unbind()
+        self.bindings = []
+        if hasattr(self, "bind") and self.item: self.bind()
+
 class List(Gio.ListStore):
 
     item_class = GObject.Property(type=object)
@@ -370,6 +401,12 @@ class DBUS:
     @staticmethod
     def path(i): return "/" + i.replace(".", "/")
 
+class AutocompleteItem(ListItem):
+    def __init__(self): super().__init__(child=Gtk.Label(xalign=0))
+
+    def bind(self):
+        self.bindings = [self.item.bind_property("string", self.get_child(), "label", DEFAULT_BIND)]
+
 class Autocomplete(Gtk.Popover):
     listview = GObject.Property(type=Gtk.ListView)
     model = GObject.Property(type=List)
@@ -378,7 +415,7 @@ class Autocomplete(Gtk.Popover):
     select_function = GObject.Property(type=object)
     text_activate_function = GObject.Property(type=object)
 
-    def __init__(self, text, select=None, text_activate=None, row_activate=None, complete=None, model=None, factory=None, bind=None, setup=None, teardown=None, unbind=None, hexpand=True, max_content_width=-1, max_content_height=400):
+    def __init__(self, text, select=None, text_activate=None, row_activate=None, complete=None, model=None, factory=None, hexpand=True, max_content_width=-1, max_content_height=400):
         super().__init__(child=Gtk.ScrolledWindow(vscrollbar_policy=Gtk.PolicyType.EXTERNAL, hscrollbar_policy=Gtk.PolicyType.EXTERNAL, propagate_natural_height=True, propagate_natural_width=True, max_content_width=max_content_width, max_content_height=max_content_height, hexpand=hexpand), can_focus=False, has_arrow=False, autohide=False, hexpand=hexpand)
         self.select_function = self.__class__.default_select if select == True else select
         self.text_activate_function= text_activate
@@ -399,19 +436,7 @@ class Autocomplete(Gtk.Popover):
         e.connect("key-pressed", self.__class__.on_key_pressed)
         text.add_controller(e)
         self.set_parent(text)
-        if not factory and any((bind, setup, teardown, unbind)):
-            factory = Gtk.SignalListItemFactory.new()
-            factory.connect("setup", setup or self.__class__.setup)
-            factory.connect("bind", bind or self.__class__.bind)
-            factory.connect("unbind", unbind or self.__class__.unbind)
-            factory.connect("teardown", teardown or self.__class__.teardown)
-        if not factory and not hasattr(self.__class__, "factory"):
-            self.__class__.factory = Gtk.SignalListItemFactory.new()
-            self.__class__.factory.connect("setup", self.__class__.setup)
-            self.__class__.factory.connect("bind", self.__class__.bind)
-            self.__class__.factory.connect("unbind", self.__class__.unbind)
-            self.__class__.factory.connect("teardown", self.__class__.teardown)
-        self.listview.set_factory(factory or self.__class__.factory)
+        self.listview.set_factory(factory or AutocompleteItem.factory)
 
     def set_text(self, t="", p=-1):
         self.changing = True
@@ -474,22 +499,6 @@ class Autocomplete(Gtk.Popover):
             self.model.replace()
             self.popdown()
             return True
-
-    @staticmethod
-    def setup(f, l): l.set_child(Gtk.Label(xalign=0))
-
-    @staticmethod
-    def bind(f, l):
-        if not l.get_child(): return
-        l.get_child().bindings = [l.get_property("item").bind_property("string", l.get_child(), "label", DEFAULT_BIND)]
-
-    @staticmethod
-    def unbind(f, l):
-        for i in getattr(l.get_child(), "bindings", []): i.unbind()
-        if hasattr(l.get_child(), "bindings"): del l.get_child().bindings
-
-    @staticmethod
-    def teardown(f, l): l.set_child(None)
 
     @staticmethod
     def n_items_changed(a, b, self):
@@ -857,33 +866,20 @@ class BarChartBar(ListObject):
             return
         self.notify("height")
 
-    factory = Gtk.SignalListItemFactory.new()
-    @staticmethod
-    def setup(f, l): l.set_child(Adw.Bin(css_name="bar", valign=Gtk.Align.END))
-    factory.connect("setup", setup)
-    @staticmethod
-    def bind(f, l):
-        if not l.get_child(): return
-        l.get_child().bindings = []
-        l.get_child().get_parent().set_css_classes([])
-        l.get_child().bindings.append(l.get_property("item").bind_property("title", l.get_child(), "tooltip-text", DEFAULT_BIND))
-        l.get_child().bindings.append(l.get_property("item").bind_property("height", l.get_child(), "height-request", DEFAULT_BIND))
-    factory.connect("bind", bind)
-    @staticmethod
-    def unbind(f, l):
-        for i in getattr(l.get_child(), "bindings", []): i.unbind()
-        if hasattr(l.get_child(), "bindings"): del l.get_child().bindings
-    factory.connect("unbind", unbind)
-    @staticmethod
-    def teardown(f, l): l.set_child(None)
-    factory.connect("teardown", teardown)
+class BarChartBarItem(ListItem):
+    def __init__(self):
+        super().__init__(css_name="bar", valign=Gtk.Align.END)
+
+    def bind(self):
+        self.bindings.append(self.item.bind_property("title", self, "tooltip-text", DEFAULT_BIND))
+        self.bindings.append(self.item.bind_property("height", self, "height-request", DEFAULT_BIND))
 
 class BarChart(Gtk.ListView):
     bars = GObject.Property(type=List, flags=GObject.ParamFlags.READWRITE | GObject.ParamFlags.CONSTRUCT_ONLY)
     max_value = GObject.Property(type=int)
 
     def __init__(self, data=None, height_request=300):
-        super().__init__(css_name="bar-chart", orientation=Gtk.Orientation.HORIZONTAL, model=Gtk.NoSelection(), factory=BarChartBar.factory, height_request=height_request, bars=List(BarChartBar), halign=Gtk.Align.CENTER)
+        super().__init__(css_name="bar-chart", orientation=Gtk.Orientation.HORIZONTAL, model=Gtk.NoSelection(), factory=BarChartBarItem.factory, height_request=height_request, bars=List(BarChartBar), halign=Gtk.Align.CENTER)
         self.set_css_classes([])
         self.bind_property("bars", self.get_model(), "model", DEFAULT_BIND)
         self.bars.connect("items-changed", self.__class__.items_changed, self)
@@ -916,6 +912,12 @@ class CalendarHeatmapDay(ListObject):
             return
         self.notify("opacity")
 
+class CalendarHeatmapDayItem(ListItem):
+    def bind(self):
+        self.bindings.append(self.item.bind_property("title", self, "tooltip-text", DEFAULT_BIND))
+        self.bindings.append(self.item.bind_property("opacity", self, "opacity", DEFAULT_BIND))
+        self.bindings.append(self.item.bind_property("opacity",self, "css-classes", DEFAULT_BIND, CalendarHeatmapDayItem.css_bind))
+
     @staticmethod
     def css_bind(b, v):
         self = b.get_property("source")
@@ -924,36 +926,13 @@ class CalendarHeatmapDay(ListObject):
         if self.value == 0 and not self.type == "Pad": l.append("empty")
         return l
 
-    factory = Gtk.SignalListItemFactory.new()
-    @staticmethod
-    def setup(f, l): l.set_child(Adw.Bin())
-    factory.connect("setup", setup)
-    @staticmethod
-    def bind(f, l):
-        if not l.get_child(): return
-        l.get_child().bindings = []
-        Task.invoke(l.get_child().get_parent().set_css_classes, [])
-        l.get_child().bindings.append(l.get_property("item").bind_property("title", l.get_child(), "tooltip-text", DEFAULT_BIND))
-        l.get_child().bindings.append(l.get_property("item").bind_property("opacity", l.get_child(), "opacity", DEFAULT_BIND))
-        l.get_child().bindings.append(l.get_property("item").bind_property("opacity", l.get_child(), "css-classes", DEFAULT_BIND, CalendarHeatmapDay.css_bind))
-    factory.connect("bind", bind)
-    @staticmethod
-    def unbind(f, l):
-        for i in getattr(l.get_child(), "bindings", []): i.unbind()
-        if hasattr(l.get_child(), "bindings"): del l.get_child().bindings
-    factory.connect("unbind", unbind)
-    @staticmethod
-    def teardown(f, l): l.set_child(None)
-    factory.connect("teardown", teardown)
-
 class CalendarHeatmap(Gtk.GridView):
-
     days = GObject.Property(type=List, flags=GObject.ParamFlags.READWRITE | GObject.ParamFlags.CONSTRUCT_ONLY)
     max_value = GObject.Property(type=int)
     year = GObject.Property(type=int, default=1, minimum=1)
 
     def __init__(self, data=None, year=1, title=False):
-        super().__init__(halign=Gtk.Align.CENTER, min_columns=53, max_columns=53, model=Gtk.NoSelection(), factory=CalendarHeatmapDay.factory, css_name="calendar-heatmap", days=List(CalendarHeatmapDay))
+        super().__init__(halign=Gtk.Align.CENTER, min_columns=53, max_columns=53, model=Gtk.NoSelection(), factory=CalendarHeatmapDayItem.factory, css_name="calendar-heatmap", days=List(CalendarHeatmapDay))
         self.set_css_classes([])
         self.year = year
         self.connect("notify::year", self.__class__.do)
