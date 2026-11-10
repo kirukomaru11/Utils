@@ -72,7 +72,7 @@ class Data(GObject.Object):
                 if d:
                     key["Rest"] = (key["Rest"] + " " + d).strip()
                 props.append(key)
-            table = getattr(item, "table", item.__name__)
+            table = getattr(item, "table", item.__name__.rstrip("s") + "s")
             table_columns_init = "(" + ", ".join([" ".join((f"\"{i['Name']}\"", i["Type"], i["Rest"])).strip() for i in props]) + ")"
             self.execute(f"CREATE TABLE IF NOT EXISTS \"{table}\" {table_columns_init}").close()
             self.commit()
