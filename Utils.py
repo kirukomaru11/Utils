@@ -41,11 +41,54 @@ class Data(GObject.Object):
         else:
             for i in ("foreign_keys = ON", "auto_vacuum = full", "optimize = 0x10002", "secure_delete = true", "journal_mode = WAL"): self.execute(f"PRAGMA {i}").close()
         if not self.readonly:
-            if init: self.data.executescript(init).close()
+            if init: self.parse_init(init)
             self.commit()
 
+    def parse_init(self, init):
+        if isinstance(init, str): return self.data.executescript(init).close()
+        for item in init:
+            if isinstance(item, str):
+                self.data.executescript(item).close()
+                continue
+            props = []
+            for i in getattr(item, "properties", item.list_properties()):
+                name = (i if isinstance(i, str) else i.name).replace("-", "_")
+                prop = getattr(item, name)
+                title = prop.nick or name.replace("_", " ").title()
+                if title == "NONE": continue
+                t = prop.type.name
+                ty = "TEXT"
+                if t in ("gint", "gboolean"):
+                    ty = "INTEGER"
+                key = {"Name": title, "Type": ty, "Rest": ""}
+                if t == "gboolean":
+                    key["Rest"] += f"NOT NULL DEFAULT {int(prop.default)}"
+                elif type(prop.default) == int:
+                    key["Rest"] += f"DEFAULT {prop.default}"
+                elif t == "gchararray" and prop.default:
+                    key["Rest"] += f"DEFAULT {prop.default}"
+                key["Rest"] = key["Rest"].strip()
+                d = getattr(item, "properties_extra", {}).get(title, False)
+                if d:
+                    key["Rest"] = (key["Rest"] + " " + d).strip()
+                props.append(key)
+            table = getattr(item, "table", item.__name__)
+            table_columns_init = "(" + ", ".join([" ".join((f"\"{i['Name']}\"", i["Type"], i["Rest"])).strip() for i in props]) + ")"
+            self.execute(f"CREATE TABLE IF NOT EXISTS \"{table}\" {table_columns_init}").close()
+            self.commit()
+            columns = [i["Name"] for i in props]
+            table_columns = self.columns(table)
+            if table_columns != columns:
+                print("Data: Updating", table)
+                self.execute(f"CREATE TABLE \"{table}2\" {table_columns_init}").close()
+                common_columns = ", ".join([f"\"{i}\"" for i in table_columns if i in columns])
+                self.execute(f"INSERT INTO \"{table}2\" ({common_columns}) SELECT {common_columns} FROM \"{table}\"").close()
+                self.execute(f"DROP TABLE \"{table}\"").close()
+                self.execute(f"ALTER TABLE \"{table}2\" RENAME TO \"{table}\"").close()
+                self.commit()
+
     def columns(self, table):
-        c = self.execute("PRAGMA table_info(" + table + ")")
+        c = self.execute("PRAGMA table_info(\"" + table + "\")")
         v = c.fetchall()
         c.close()
         self.commit()
@@ -137,9 +180,10 @@ class Data(GObject.Object):
     def set_default(self, table="", conditions="", conds=(), names=(), values=()):
         if not self.exists(table=table, conditions=conditions, conds=conds) and not self.readonly: self.new(table=table, names=names, values=values)
 
-    def table_clear(self, table):
+    def table_clear(self, table=""):
         self.execute(f"DELETE FROM '{table}'").close()
-        self.execute(f"UPDATE sqlite_sequence SET seq = 0 WHERE name = '{table}'").close()
+        try: self.execute(f"UPDATE sqlite_sequence SET seq = 0 WHERE name = '{table}'").close()
+        except: pass
         self.commit()
 
     def table_exists(self, table):
@@ -209,15 +253,17 @@ class ListObject(GObject.Object):
 
     def to_dict(self):
         v = {}
-        for i in self.list_properties():
-            attr = i.name.replace("-", "_")
-            if not hasattr(self, attr): continue
-            n = i.nick or attr.title().replace("_", " ")
-            v[n] = getattr(self, attr)
+        for i in getattr(self.__class__, "properties", self.list_properties()):
+            name = (i if isinstance(i, str) else i.name).replace("-", "_")
+            if not hasattr(self, name): continue
+            attr = getattr(self.__class__, name)
+            n = attr.nick or name.replace("_", " ").title()
+            v[n] = getattr(self, name)
         return v
 
 class ListItem(Adw.Bin):
     item = GObject.Property(type=GObject.Object)
+    parent_options = {"css_classes": [], "focusable": False}
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -227,7 +273,7 @@ class ListItem(Adw.Bin):
             def bind(f, l):
                 if not l.get_child(): return
                 l.get_child().item = l.get_property("item")
-                Task.invoke(l.get_child().get_parent().set_properties, css_classes=[], focusable=False)
+                if cls.parent_options: Task.invoke(l.get_child().get_parent().set_properties, **cls.parent_options)
             def unbind(f, l):
                 l.get_child().item = None
             def teardown(f, l): l.set_child(None)
@@ -256,7 +302,7 @@ class List(Gio.ListStore):
     def __init__(self, t, unique="", list=False, static=False):
         self._dict = {}
         super().__init__(item_class=t, item_type=t, unique=unique, static=static)
-        if list:
+        if list != False:
             if not type(list) == bool: self.extend(list)
             if hasattr(self.item_class, "items_changed"): self.connect("items-changed", self.item_class.items_changed)
 
@@ -2773,7 +2819,13 @@ class App(Adw.Application):
             if "CREATE TABLE IF NOT EXISTS Windows" in data and not window_removed:
                 window_removed = self.__class__.persist_windows_window_removed
             shutdown = shutdown or self.__class__.default_data_shutdown
-            self.__class__.default.data = Data(Path(self.__class__.default.data_folder, "data"), data)
+            p = Path(self.__class__.default.data_folder, "data")
+            if GLib.getenv("NO_BACKUP") != "1" and exists(p):
+                now = GLib.DateTime.new_now_utc()
+                copy(p, p + f" {now.format('%Y%m%d%H%M%S')}")
+                files = sorted((i for i in list_dir(self.__class__.default.data_folder) if i.startswith("data ") and i.split("data ", 1)[-1].isdigit() and len(i.split("data ", 1)[-1]) == 14), key=alphabetical_sort)
+                while len(files) > 3: delete(Path(self.__class__.default.data_folder, files.pop(0)))
+            self.__class__.default.data = Data(p, data)
         if activate: self.connect("activate", activate)
         if shutdown: self.connect("shutdown", shutdown)
         if file_open: self.connect("open", file_open)
