@@ -57,7 +57,11 @@ class Data(GObject.Object):
                 title = prop.nick or name.replace("_", " ").title()
                 if title == "NONE": continue
                 t = prop.type.name
-                ty = "TEXT"
+                ty = ""
+                if t == "gdouble":
+                    ty = "REAL"
+                if t == "gchararray":
+                    ty = "TEXT"
                 if t in ("gint", "gboolean"):
                     ty = "INTEGER"
                 key = {"Name": title, "Type": ty, "Rest": ""}
@@ -73,7 +77,7 @@ class Data(GObject.Object):
                     key["Rest"] = (key["Rest"] + " " + d).strip()
                 props.append(key)
             table = getattr(item, "table", item.__name__.rstrip("s") + "s")
-            table_columns_init = "(" + ", ".join([" ".join((f"\"{i['Name']}\"", i["Type"], i["Rest"])).strip() for i in props]) + ")"
+            table_columns_init = "(" + ", ".join([" ".join([f"\"{i['Name']}\""] + ([i["Type"]] if i["Type"] else []) + ([i["Rest"]] if i["Rest"] else [])).strip() for i in props]) + ")"
             self.execute(f"CREATE TABLE IF NOT EXISTS \"{table}\" {table_columns_init}").close()
             self.commit()
             columns = [i["Name"] for i in props]
