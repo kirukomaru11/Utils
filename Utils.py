@@ -70,7 +70,7 @@ class Data(GObject.Object):
                 elif type(prop.default) == int:
                     key["Rest"] += f"DEFAULT {prop.default}"
                 elif t == "gchararray" and prop.default:
-                    key["Rest"] += f"DEFAULT {prop.default}"
+                    key["Rest"] += f"DEFAULT \"{prop.default}\""
                 key["Rest"] = key["Rest"].strip()
                 d = getattr(item, "properties_extra", {}).get(title, False)
                 if d:
