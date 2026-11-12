@@ -49,10 +49,11 @@ class Data(GObject.Object):
         if isinstance(init, str): return self.data.executescript(init).close()
         for item in init:
             if isinstance(item, str):
-                self.data.executescript(item).close()
+                self.data.executescript(item.rstrip(";") + ";").close()
                 continue
-            props = []
-            for i in getattr(item, "properties", item.list_properties()):
+            props = {}
+            l = item.properties if hasattr(item, "properties") else item.list_properties()
+            for i in l:
                 name = (i if isinstance(i, str) else i.name).replace("-", "_")
                 prop = getattr(item, name)
                 title = prop.nick or name.replace("_", " ").title()
@@ -76,12 +77,17 @@ class Data(GObject.Object):
                 d = getattr(item, "properties_extra", {}).get(title, False)
                 if d:
                     key["Rest"] = (key["Rest"] + " " + d).strip()
-                props.append(key)
+                props[name] = key
             table = getattr(item, "table", item.__name__.rstrip("s") + "s")
-            table_columns_init = "(" + ", ".join([" ".join([f"\"{i['Name']}\""] + ([i["Type"]] if i["Type"] else []) + ([i["Rest"]] if i["Rest"] else [])).strip() for i in props]) + ")"
+            indexes = []
+            if hasattr(item, "indexes"):
+                for i in item.indexes:
+                    index = (i, ) if isinstance(i, str) else i
+                    index = [props[i]["Name"] for i in index]
+                    indexes.append(f"CREATE INDEX IF NOT EXISTS \"{table} {' '.join(index)}\" ON {table}({', '.join(['\"' + i + '\"' for i in index])})")
+            table_columns_init = "(" + ", ".join([" ".join([f"\"{i['Name']}\""] + ([i["Type"]] if i["Type"] else []) + ([i["Rest"]] if i["Rest"] else [])).strip() for i in props.values()]) + ")"
             self.execute(f"CREATE TABLE IF NOT EXISTS \"{table}\" {table_columns_init}").close()
-            self.commit()
-            columns = [i["Name"] for i in props]
+            columns = [i["Name"] for i in props.values()]
             table_columns = self.columns(table)
             if table_columns != columns:
                 print("Data: Updating", table)
@@ -90,7 +96,8 @@ class Data(GObject.Object):
                 self.execute(f"INSERT INTO \"{table}2\" ({common_columns}) SELECT {common_columns} FROM \"{table}\"").close()
                 self.execute(f"DROP TABLE \"{table}\"").close()
                 self.execute(f"ALTER TABLE \"{table}2\" RENAME TO \"{table}\"").close()
-                self.commit()
+            for i in indexes: self.execute(i).close()
+            self.commit()
 
     def columns(self, table):
         c = self.execute("PRAGMA table_info(\"" + table + "\")")
@@ -222,6 +229,39 @@ class Data(GObject.Object):
 
     def execute(self, *args): return self.data.execute(*args)
     def close(self): return self.data.close()
+
+class DictSettingMeta(type):
+    properties = ["key", "value"]
+
+    def __init__(cls, name, bases, namespace, **kwargs):
+        super().__init__(name, bases, namespace, **kwargs)
+        if "table" not in namespace:
+            cls.table = cls.__name__.rstrip("s") + "s"
+        if "key" not in namespace:
+            cls.key = GObject.Property(type=str, nick="Key")
+        if "value" not in namespace:
+            cls.value = GObject.Property(type=str, nick="Value")
+        if "indexes" not in namespace:
+            cls.indexes = ["key"]
+        if "properties_extra" not in namespace:
+            cls.properties_extra = {cls.key.nick: "PRIMARY KEY NOT NULL"}
+
+    def get_data(cls): return App.default.data
+
+    def __getitem__(cls, key): return cls.get_data().read(table=cls.table, column=cls.value.nick, conditions=f"{cls.key.nick} = ?", conds=(key,)) or None
+
+    def __setitem__(cls, key, value):
+        cls.set_default(key, value)
+        return cls.get_data().update(table=cls.table, conditions=f"{cls.key.nick} = ?", column=cls.value.nick, conds=(key,), value=value)
+
+    def __delitem__(cls, key): return cls.get_data().delete(table=cls.table, conditions=f"{cls.key.nick} = ?", conds=(key,))
+
+    def set_default(cls, key, value): return cls.get_data().set_default(table=cls.table, conditions=f"{cls.key.nick} = ?", conds=(key,), values=(key, value))
+
+    def persist_action(cls, group, action_name, key, default_value): return cls.get_data().persist_action(App.default, action_name, (key, default_value), cls.table, cls.value.nick, f"{cls.key.nick} = ?", (key,))
+
+class DataSetting(metaclass=DictSettingMeta):
+    table = "Settings"
 
 class ListObject(GObject.Object):
     def __init__(self, d=False, **kwargs):
