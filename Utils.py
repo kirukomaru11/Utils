@@ -248,7 +248,12 @@ class DictSettingMeta(type):
 
     def get_data(cls): return App.default.data
 
-    def __getitem__(cls, key): return cls.get_data().read(table=cls.table, column=cls.value.nick, conditions=f"{cls.key.nick} = ?", conds=(key,)) or None
+    def __getitem__(cls, key):
+        value = cls.get_data().read(table=cls.table, column=cls.value.nick, conditions=f"{cls.key.nick} = ?", conds=(key,), force_tuple=True)
+        value = value[0] if value else None
+        if isinstance(value, str) and len(value) == 1 and value.isdigit():
+            value = int(value)
+        return value
 
     def __setitem__(cls, key, value):
         cls.set_default(key, value)
