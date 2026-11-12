@@ -27,7 +27,7 @@ class Data(GObject.Object):
     path = GObject.Property(type=str)
     data = GObject.Property(type=object)
     readonly = GObject.Property(type=bool, default=False)
-    def __init__(self, path, init="", readonly=False):
+    def __init__(self, path, init="", readonly=False, vacuum=True):
         super().__init__()
         self.readonly = readonly
         self.path = path
@@ -36,13 +36,14 @@ class Data(GObject.Object):
         if self.readonly:
             path = uri_encode(path) + "?immutable=1"
         self.data = connect(path, timeout=30, check_same_thread=False, autocommit=False, uri="://" in path)
+        self.execute("COMMIT").close()
         if self.readonly:
             for i in ("query_only",): self.execute(f"PRAGMA {i}").close()
         else:
-            for i in ("foreign_keys = ON", "auto_vacuum = full", "optimize = 0x10002", "secure_delete = true", "journal_mode = WAL"): self.execute(f"PRAGMA {i}").close()
+            for i in ("synchronous = NORMAL", "cache_size = -64000", "foreign_keys = ON", "auto_vacuum = full", "optimize = 0x10002", "secure_delete = true", "journal_mode = WAL"): self.execute(f"PRAGMA {i}").close()
         if not self.readonly:
+            if vacuum: self.execute("VACUUM").close()
             if init: self.parse_init(init)
-            self.commit()
 
     def parse_init(self, init):
         if isinstance(init, str): return self.data.executescript(init).close()
@@ -95,14 +96,12 @@ class Data(GObject.Object):
         c = self.execute("PRAGMA table_info(\"" + table + "\")")
         v = c.fetchall()
         c.close()
-        self.commit()
         return [i[1] for i in v]
 
     def tables(self):
         c = self.execute("SELECT name FROM sqlite_master WHERE type = \"table\" AND name NOT LIKE \"sqlite_%\"")
         v = c.fetchall()
         c.close()
-        self.commit()
         return [i[0] for i in v]
 
     def update(self, table="", column="*", value=None, conditions="", conds=()):
@@ -127,7 +126,6 @@ class Data(GObject.Object):
         c = self.execute(f"SELECT EXISTS(SELECT 1 FROM '{table}'{(' WHERE ' + conditions) if conditions else ''})", conds)
         v = c.fetchall()
         c.close()
-        self.commit()
         return all(all(i) for i in v) if v else False
 
     def get(self, names=None, values=(), table="", column="*", conditions="", conds=(), return_dict=False):
@@ -143,7 +141,6 @@ class Data(GObject.Object):
         c = self.execute(t, conds)
         v = c.fetchall()
         c.close()
-        self.commit()
         if v and len(v) == 1:
             v = v[0]
         if v and isinstance(v, tuple) and len(v) == 1:
@@ -194,7 +191,6 @@ class Data(GObject.Object):
         c = self.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", table)
         v = c.fetchall()
         c.close()
-        self.commit()
         return v
 
     @staticmethod
@@ -4180,8 +4176,8 @@ class Log(Adw.Window):
             try: Task.invoke(self.stderr.original_write, text, log=False)
             except: pass
         if text.strip():
-            Task.invoke(self.check_size)
-            Task.invoke(setattr, self, "empty", False)
+            Task.invoke(self.check_size, log=False)
+            Task.invoke(setattr, self, "empty", False, log=False)
             Task.invoke(self.box.append, self.text_to_label(text.strip(), css_name="error"), log=False)
             Task.invoke(self.present, log=False)
 
@@ -4195,8 +4191,8 @@ class Log(Adw.Window):
             try: Task.invoke(self.stdout.original_write, text, log=False)
             except: pass
         if text.strip():
-            Task.invoke(self.check_size)
-            Task.invoke(setattr, self, "empty", False)
+            Task.invoke(self.check_size, log=False)
+            Task.invoke(setattr, self, "empty", False, log=False)
             Task.invoke(self.box.append, self.text_to_label(text.strip(), css_name="log"), log=False)
             if self.opened and not self.get_visible(): Task.invoke(self.present, log=False)
 
