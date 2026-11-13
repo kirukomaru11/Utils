@@ -52,14 +52,39 @@ class Data(GObject.Object):
                 self.data.executescript(item.rstrip(";") + ";").close()
                 continue
             props = {}
-            l = item.properties if hasattr(item, "properties") else item.list_properties()
+            table = getattr(item, "table", item.__name__.rstrip("s") + "s")
+            if hasattr(item, "get_data_properties"):
+                l = item.get_data_properties()
+            else:
+                l = item.properties if hasattr(item, "properties") else item.list_properties()
             for i in l:
                 name = (i if isinstance(i, str) else i.name).replace("-", "_")
-                prop = getattr(item, name)
-                title = prop.nick or name.replace("_", " ").title()
-                if title == "NONE": continue
-                t = prop.type.name
+                prop = getattr(item, name, None)
+                title = getattr(prop, "nick", None) or name.replace("_", " ").title()
+                t = getattr(getattr(prop, "type", None), "name", "")
                 ty = ""
+                if issubclass(item, DataWindowTabViewTab):
+                    if name == "window":
+                        t = "gint"
+                    if name == "tab_view":
+                        t = "gint"
+                if issubclass(item, DataWindowTab):
+                    if name == "window":
+                        t = "gint"
+                if issubclass(item, DataTabViewTab):
+                    if name == "tab_view":
+                        t = "gint"
+                if issubclass(item, DataTab):
+                    if name == "id":
+                        t = "gint"
+                if issubclass(item, DataWindow):
+                    if name == "id":
+                        t = "gint"
+                    if name in ("default_width", "default_height"):
+                        t = "gint"
+                    if name == "maximized":
+                        t = "gboolean"
+                if title == "NONE": continue
                 if t == "gdouble":
                     ty = "REAL"
                 if t == "gchararray":
@@ -67,18 +92,18 @@ class Data(GObject.Object):
                 if t in ("gint", "gboolean"):
                     ty = "INTEGER"
                 key = {"Name": title, "Type": ty, "Rest": ""}
-                if t == "gboolean":
+                default = getattr(prop, "default", None)
+                if t == "gboolean" and default != None:
                     key["Rest"] += f"NOT NULL DEFAULT {int(prop.default)}"
-                elif type(prop.default) == int:
+                elif type(default) == int:
                     key["Rest"] += f"DEFAULT {prop.default}"
-                elif t == "gchararray" and prop.default:
+                elif t == "gchararray" and default != None:
                     key["Rest"] += f"DEFAULT \"{prop.default}\""
                 key["Rest"] = key["Rest"].strip()
                 d = getattr(item, "properties_extra", {}).get(title, False)
                 if d:
                     key["Rest"] = (key["Rest"] + " " + d).strip()
                 props[name] = key
-            table = getattr(item, "table", item.__name__.rstrip("s") + "s")
             indexes = []
             if hasattr(item, "indexes"):
                 for i in item.indexes:
@@ -92,8 +117,12 @@ class Data(GObject.Object):
             if table_columns != columns:
                 print("Data: Updating", table)
                 self.execute(f"CREATE TABLE \"{table}2\" {table_columns_init}").close()
-                common_columns = ", ".join([f"\"{i}\"" for i in table_columns if i in columns])
-                self.execute(f"INSERT INTO \"{table}2\" ({common_columns}) SELECT {common_columns} FROM \"{table}\"").close()
+                l1 = [i for i in table_columns if i in columns]
+                l2 = list(l1)
+                if table == "Tabs" and "Tab View" in columns and "TabView" in table_columns:
+                    l1.append("Tab View")
+                    l2.append("TabView")
+                self.execute(f"INSERT INTO \"{table}2\" ({', '.join([f'\"{i}\"' for i in l1])}) SELECT {', '.join([f'\"{i}\"' for i in l2])} FROM \"{table}\"").close()
                 self.execute(f"DROP TABLE \"{table}\"").close()
                 self.execute(f"ALTER TABLE \"{table}2\" RENAME TO \"{table}\"").close()
             for i in indexes: self.execute(i).close()
@@ -446,6 +475,539 @@ class List(Gio.ListStore):
         self.splice(0, len(self), l)
         if self.static: self.do_dict()
 
+class Window(Adw.ApplicationWindow):
+
+    @classproperty
+    def current(*_): return next((i for i in Gtk.Window.list_toplevels() if hasattr(i, "get_application") and i.get_application() == App.default and isinstance(i, Window)), None)
+
+    def __init__(self, **kwargs):
+        if "title" in kwargs:
+            title = kwargs["title"]
+        else:
+            title = App.default.about.get_application_name() if App.default and App.default.about else App.default.get_application_id().rsplit(".", 1)[-1] if App.default else self.__class__.__name__
+        toast_overlay = Adw.ToastOverlay()
+        super().__init__(css_name=kwargs["css_name"] if "css_name" in kwargs else "window", application=App.default, content=toast_overlay, title=title, height_request=1, width_request=1, default_width=100, default_height=100)
+        if "content" in kwargs: self.set_content(kwargs["content"])
+        self.add_css_class(self.get_title().lower().replace(" ", "-") + "-window")
+        self.add_css_class(self.__class__.__name__.lower())
+        self.__class__.controller_init(self)
+
+    def add_actions(self, *actions):
+        for i in actions:
+            name, callback, accels = i[0], i[1], i[2] if len(i) == 3 else ""
+            self.add_action(Gio.SimpleAction.new(name, None))
+            if accels != "" and self.get_application(): self.get_application().set_accels_for_action(f"win.{name}", accels.split(" "))
+            if callback: self.lookup_action(name).connect("activate", callback, self)
+
+    def add_stateful_actions(self, *actions):
+        for i in actions:
+            name, state, parameter, callback, accels = i[0], i[1], i[2] if len(i) > 2 else None, i[3] if len(i) > 3 else "", i[4] if len(i) > 4 else ""
+            self.add_action(Gio.SimpleAction.new_stateful(name, parameter, state))
+            if accels != "" and self.get_application(): self.get_application().set_accels_for_action(f"win.{name}", accels.split(" "))
+            if callback: self.lookup_action(name).connect("notify::state", callback, self)
+
+    def get_content(self): return Adw.ApplicationWindow.get_content(self).get_child()
+
+    def set_content(self, w): return Adw.ApplicationWindow.get_content(self).set_child(w)
+
+    def get_child(self): return Window.get_content(self)
+
+    def set_child(self, w): return Window.set_content(self, w)
+
+    def get_widget_at_popover(self, popover=None, x=0, y=0):
+        if not popover: return
+        s = popover.get_first_child().get_first_child()
+        p = self.compute_point(s, Graphene.Point.init(Graphene.Point(), x, y))[-1]
+        if p and s.get_width() >= p.x >= 0 and s.get_height() >= p.y >= 0: return s.pick(p.x, p.y, Gtk.PickFlags.DEFAULT)
+
+    def show_popover_at_widget(self, popover=None, widget=None, x=0, y=0):
+        if not popover or not widget: return
+        if popover.get_parent() != widget:
+            popover.unparent()
+            popover.set_parent(widget)
+        popover.present()
+        r = Gdk.Rectangle()
+        w = max(popover.get_first_child().get_preferred_size()[1].width, popover.get_property("width-request"))
+        p = self.compute_point(widget, Graphene.Point.init(Graphene.Point(), min(self.get_width() - 10, x + (min(w, 360) / 2)), y))[-1]
+        r.x, r.y = p.x, p.y
+        popover.set_pointing_to(r)
+        popover.popup()
+
+    def change_fullscreen(self, *_):
+        if hasattr(self.__class__, "fullscreen") and hasattr(self.__class__.fullscreen, "nick"):
+            a = self.fullscreen
+        else:
+            a = self.lookup_action("fullscreen") or Gio.Application.get_default().lookup_action("fullscreen")
+            if not a: return
+            a = a.get_state().unpack()
+        if hasattr(self, "wide") and hasattr(self, "narrow"):
+            for i in (self.wide, self.narrow):
+                if a: ToolbarFullscreen.fu(i)
+                else: ToolbarFullscreen.un(i)
+        elif hasattr(self, "toolbar"):
+            if a: ToolbarFullscreen.fu(self.toolbar)
+            else: ToolbarFullscreen.un(self.toolbar)
+
+    @staticmethod
+    def draw_drag_update(e, x, y):
+        if e.get_current_button() != 1: return e.reset()
+        self = e.get_widget()
+        sx, sy = self.drag_start
+        self.drag_to = (sx + x, sy + y)
+        self.draw.queue_draw()
+        e.set_state(Gtk.EventSequenceState.CLAIMED)
+
+    @staticmethod
+    def reset_draw(d, w=0, h=0):
+        self = d.get_root()
+        self.drag_start = (0, 0)
+        self.draw.queue_draw()
+
+    @staticmethod
+    def click_to_args(*args):
+        e = n = x = y = signal = b = s = self = None
+        if isinstance(args[0], Gtk.EventController):
+            if isinstance(args[0], Gtk.GestureLongPress):
+                e, x, y, signal = args
+                n = 1
+            else:
+                e, n, x, y, signal = args
+            b = e.get_current_button()
+            s = e.get_current_event_state()
+            self = e.get_widget().get_root()
+        if isinstance(args[0], Window):
+            n = 1
+            self, x, y, signal, b, s = args
+        return self, e, n, x, y, signal, b, s
+
+    def key_to_click(self, v, signal="released", widget=False, mask=None):
+        if not hasattr(self, "on_click"): return
+        widget = widget or self.get_focus()
+        if not widget: return
+        bounds = widget.compute_bounds(self)[1]
+        x, y = bounds.get_x() + 1, bounds.get_y() + 1
+        if v == Gdk.KEY_Menu: self.on_click(self, x, y, signal, 3, mask)
+        if v == Gdk.KEY_space: self.on_click(self, x, y, signal, 1, mask)
+        if Gdk.ModifierType.SHIFT_MASK in mask and v == Gdk.KEY_Return: self.on_click(self, x, y, signal, 2, mask)
+
+    def controller_init(self, widget=None):
+        widget = widget or self
+        if hasattr(self.__class__, "on_click"):
+            for e in (Gtk.GestureClick(button=0), Gtk.GestureLongPress(button=0)):
+                e.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+                e.set_propagation_limit(Gtk.PropagationLimit.NONE)
+                e.connect("pressed", self.__class__.on_click, "pressed")
+                if isinstance(e, Gtk.GestureClick): e.connect("released", self.__class__.on_click, "released")
+                widget.add_controller(e)
+        if hasattr(self.__class__, "on_scroll"):
+            e = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.VERTICAL | Gtk.EventControllerScrollFlags.DISCRETE)
+            e.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+            e.connect("scroll", self.__class__.on_scroll)
+            widget.add_controller(e)
+        s = ("drag-update", "drag-begin", "drag-end")
+        if any((hasattr(self.__class__, "on_gesture_drag_" + i.replace("-", "_")) for i in s)):
+            e = Gtk.GestureDrag(button=0)
+            for i in s:
+                n = "on_gesture_drag_" + i.replace("-", "_")
+                if hasattr(self.__class__, n): e.connect(i, getattr(self.__class__, n))
+            widget.add_controller(e)
+        s = ("prepare", "drag-begin", "drag-end")
+        if any((hasattr(self.__class__, "on_drag_source_" + i.replace("-", "_")) for i in s)):
+            e = Gtk.DragSource(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+            e.set_propagation_limit(Gtk.PropagationLimit.NONE)
+            e.set_actions(self.__class__.drag_actions if hasattr(self.__class__, "drag_actions") else Gdk.DragAction.COPY)
+            for i in s:
+                n = "on_drag_source_" + i.replace("-", "_")
+                if hasattr(self.__class__, n): e.connect(i, getattr(self.__class__, n))
+            widget.add_controller(e)
+        s = ("drop", "enter", "leave", "motion")
+        if any((hasattr(self.__class__, "on_drop_target_" + i) for i in s)):
+            e = Gtk.DropTarget(preload=True)
+            e.set_propagation_limit(Gtk.PropagationLimit.NONE)
+            e.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+            e.set_actions(self.__class__.drop_actions if hasattr(self.__class__, "drop_actions") else Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
+            if hasattr(self.__class__, "drop_target_gtypes"): e.set_gtypes(self.__class__.drop_target_gtypes)
+            for i in s:
+                n = "on_drop_target_" + i
+                if hasattr(self.__class__, n): e.connect(i, getattr(self.__class__, n))
+            widget.add_controller(e)
+
+        s = ("enter", "leave", "motion")
+        if any((hasattr(self.__class__, "on_event_" + i) for i in s)):
+            e = Gtk.EventControllerMotion()
+            if isinstance(self, Gtk.Root):
+                e.set_propagation_limit(Gtk.PropagationLimit.NONE)
+                e.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+            for i in s:
+                n = "on_event_" + i
+                if hasattr(self.__class__, n): e.connect(i, getattr(self.__class__, n))
+            widget.add_controller(e)
+        if hasattr(self.__class__, "on_key_released") or hasattr(self.__class__, "on_key_pressed"):
+            e = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+            if hasattr(self.__class__, "on_key_released"): e.connect("key-released", self.__class__.on_key_released)
+            if hasattr(self.__class__, "on_key_pressed"): e.connect("key-pressed", self.__class__.on_key_pressed)
+            widget.add_controller(e)
+        if hasattr(self.__class__, "on_map"): self.connect("map", self.__class__.on_map)
+
+class DataTabView(Adw.Bin):
+    menu_model = GObject.Property(type=Gio.MenuModel)
+    shortcuts = GObject.Property(type=Adw.TabViewShortcuts, default=Adw.TabViewShortcuts.NONE)
+
+    def __iter__(self):
+        for i in self.get_child().get_pages(): yield i.get_child()
+
+    def __init__(self, **kwargs):
+        view = Adw.TabView()
+        view.connect("page-reordered", self.__class__.view_page_reordered, self)
+        view.connect("page-attached", self.__class__.view_page_attached, self)
+        view.connect("page-detached", self.__class__.view_page_detached, self)
+        view.connect("notify::selected-page", self.__class__.view_page_changed, self)
+        super().__init__(child=view, **kwargs)
+        self.bind_property("menu-model", view, "menu-model", DEFAULT_BIND)
+        view.bind_property("shortcuts", self, "shortcuts", SYNC_BIND)
+
+    def set_menu_model(self, v=None):
+        self.menu_model = v
+
+    def set_shortcuts(self, v=None):
+        self.shortcuts = v
+
+    def transfer_page(self, page, other_view, position):
+        if hasattr(page, "tab"):
+            page = page.tab
+        if isinstance(other_view, DataTabView):
+            other_view = other_view.get_child()
+        return self.get_child().transfer_page(page, other_view, position)
+
+    def close_page(self, v): return self.get_child().close_page(v)
+
+    def close_page_finish(self, v, c): return self.get_child().close_page_finish(v, c)
+
+    def append(self, v): return self.get_child().append(v)
+
+    def add_page(self, *args): return self.get_child().add_page(*args)
+
+    def connect(self, *args): return self.get_child().connect(*args)
+
+    def get_selected_page(self): return self.get_child().get_selected_page()
+
+    def get_pages(self): return self.get_child().get_pages()
+
+    def get_n_pages(self): return self.get_child().get_n_pages()
+
+    def get_page_position(self, page): return self.get_child().get_page_position(page)
+
+    @property
+    def current(self): return self.get_selected_page().get_child() if self.get_selected_page() else None
+
+    def restore(self, tab):
+        c = []
+        conds = []
+        if issubclass(tab, DataWindowTab) or issubclass(tab, DataWindowTabViewTab):
+            c.append("\"Window\" = ?")
+            try:
+                v = self.get_root().id
+            except Exception as e:
+                print(e)
+                v = 1
+            conds.append(v)
+        if issubclass(tab, DataTabViewTab) or issubclass(tab, DataWindowTabViewTab):
+            c.append("\"Tab View\" = ?")
+            try:
+                v = int(self.get_name())
+            except Exception as e:
+                print(e)
+                v = 1
+            conds.append(v)
+        c = (" AND ".join(c) + " ORDER BY ID ASC").strip()
+        return self.get_data().read(table=tab.table, conditions=c, conds=conds, return_dict=True, force_tuple=True)
+
+    @staticmethod
+    def get_data(): return App.default.data
+
+    def sync_ids(self):
+        for n, i in enumerate([i for i in self]):
+            if isinstance(i, DataWindowTab) or isinstance(i, DataWindowTabViewTab):
+                try:
+                    v = self.get_root().id
+                except Exception as e:
+                    print(e)
+                    v = 1
+                if i.window != v:
+                    i.window = -v
+            if isinstance(i, DataTabViewTab) or isinstance(i, DataWindowTabViewTab):
+                try:
+                    v = int(self.get_name())
+                except Exception as e:
+                    print(e)
+                    v = 1
+                if i.tab_view != v:
+                    i.tab_view = -v
+            if i.id != n + 1:
+                i.id = -(n + 1)
+        for i in self:
+            if (isinstance(i, DataWindowTab) or isinstance(i, DataWindowTabViewTab)) and 0 > i.window:
+                i.window = -i.window
+            if (isinstance(i, DataTabViewTab) or isinstance(i, DataWindowTabViewTab)) and 0 > i.tab_view:
+                i.tab_view = -i.tab_view
+            if 0 > i.id:
+                i.id = -i.id
+
+    @staticmethod
+    def view_page_changed(view, p, self): return self.page_changed()
+
+    def page_changed(self): return
+
+    @staticmethod
+    def view_page_reordered(view, page, _, self): return self.page_reordered()
+
+    def page_reordered(self): return self.sync_ids()
+
+    @staticmethod
+    def view_page_attached(view, page, _, self):
+        page.get_child().tab = page
+        return self.page_attached(page.get_child())
+
+    def page_attached(self, page):
+        page.changing = True
+        if page.id == 0:
+            page.id = self.get_page_position(page.tab) + 1
+        if (isinstance(page, DataWindowTab) or isinstance(page, DataWindowTabViewTab)) and page.window == 0:
+            try:
+                v = self.get_root().id
+            except Exception as e:
+                print(e)
+                v = 1
+            page.window = v
+        if (isinstance(page, DataTabViewTab) or isinstance(page, DataWindowTabViewTab)) and page.tab_view == 0:
+            try:
+                v = int(self.get_name())
+            except Exception as e:
+                print(e)
+                v = 1
+            page.tab_view = v
+        page.changing = False
+        self.sync_ids()
+        if not page.exists: page.new()
+
+    @staticmethod
+    def view_page_detached(view, page, _, self): return self.page_detached(page.get_child())
+
+    def page_detached(self, page):
+        page.delete()
+        page.changing = True
+        page.id = 0
+        if isinstance(page, DataWindowTab) or isinstance(page, DataWindowTabViewTab):
+            page.window = 0
+        if isinstance(page, DataTabViewTab) or isinstance(page, DataWindowTabViewTab):
+            page.tab_view = 0
+        page.changing = False
+        return self.sync_ids()
+
+class DataTab(Adw.Bin):
+    tab = GObject.Property(type=Adw.TabPage)
+    changing = GObject.Property(type=bool, default=False)
+
+    @GObject.Property(nick="ID", type=int, default=1)
+    def id(self): return getattr(self, "_id", 1)
+
+    @id.setter
+    def id(self, value):
+        old = self.id if hasattr(self, "_id") else None
+        if old == value: return
+        if not self.changing and old != None: self.update("ID", value)
+        self._id = value
+
+    indexes = ["id"]
+
+    table = "Tabs"
+
+    def __init__(self, view=None, **kwargs):
+        super().__init__(**kwargs)
+        self.changing = True
+        self.id = 0
+        if isinstance(self, DataWindowTab) or isinstance(self, DataWindowTabViewTab):
+            self.window = 0
+        if isinstance(self, DataTabViewTab) or isinstance(self, DataWindowTabViewTab):
+            self.tab_view = 0
+        self.changing = False
+        if view:
+            current_tab = view.get_selected_page().get_child() if view.get_selected_page() else False
+            self.tab = view.add_page(self, current_tab.tab if current_tab else None) if view.get_mapped() else view.append(self)
+        for i in self.get_data_properties():
+            i = getattr(self.__class__, i)
+            should_connect = hasattr(i.fset, "__func__")
+            if should_connect: self.connect(f"notify::{i.name}", self.__class__.changed)
+
+    def get_condition(self):
+        cond = "\"ID\" = ?"
+        conds = [self.id]
+        if isinstance(self, DataTabViewTab) or isinstance(self, DataWindowTabViewTab):
+            cond = "\"Tab View\" = ? AND " + cond
+            conds.insert(0, self.tab_view)
+        if isinstance(self, DataWindowTab) or isinstance(self, DataWindowTabViewTab):
+            cond = "\"Window\" = ? AND " + cond
+            conds.insert(0, self.window)
+        return cond, tuple(conds)
+
+    @staticmethod
+    def get_data(): return App.default.data
+
+    def update(self, column, value):
+        c, conds = self.get_condition()
+        self.get_data().update(table=self.__class__.table, column=column, conditions=c, conds=conds, value=value)
+
+    def delete(self):
+        c, conds = self.get_condition()
+        self.get_data().delete(table=self.__class__.table, conditions=c, conds=conds)
+
+    def new(self):
+        d = {}
+        for i in self.__class__.get_data_properties():
+            name = (i if isinstance(i, str) else i.name).replace("-", "_")
+            prop = getattr(self.__class__, name, None)
+            d[getattr(prop, "nick", None) or name.replace("_", " ").title()] = getattr(self, name)
+        self.get_data().new(table=self.__class__.table, names=tuple(d.keys()), values=tuple(d.values()))
+
+    @property
+    def exists(self):
+        c, conds = self.get_condition()
+        return self.get_data().exists(table=self.__class__.table, conditions=c, conds=conds)
+
+    @staticmethod
+    def changed(self, p):
+        if self.changing: return
+        v = getattr(self, p.get_name().replace("-", "_"), None)
+        p = p.get_nick() or p.get_name().replace("-", " ").title()
+        self.update(p, v)
+
+    @classmethod
+    def get_data_properties(cls):
+        l = [i for i in (cls.properties if hasattr(cls, "properties") else cls.list_properties())]
+        if issubclass(cls, DataTabViewTab) or issubclass(cls, DataWindowTabViewTab):
+            l = ["tab_view"] + l
+        if issubclass(cls, DataWindowTab) or issubclass(cls, DataWindowTabViewTab):
+            l = ["window"] + l
+        if issubclass(cls, DataTab):
+            l = ["id"] + l
+        return l
+
+class DataWindowTab(DataTab):
+    @GObject.Property(nick="Window", type=int, default=1)
+    def window(self): return getattr(self, "_window", 1)
+
+    @window.setter
+    def window(self, value):
+        old = self.window if hasattr(self, "_window") else None
+        if old == value: return
+        if not self.changing and old != None: self.update("Window", value)
+        self._window = value
+    indexes = ["window", ("window", "id")]
+
+class DataTabViewTab(DataTab):
+    @GObject.Property(nick="Tab View", type=int, default=1)
+    def tab_view(self): return getattr(self, "_tab_view", 1)
+
+    @tab_view.setter
+    def tab_view(self, value):
+        old = self.tab_view if hasattr(self, "_tab_view") else None
+        if old == value: return
+        if not self.changing and old != None: self.update("Tab View", value)
+        self._tab_view = value
+
+    indexes = ["tab_view", ("tab_view", "id")]
+
+class DataWindowTabViewTab(DataTab):
+    @GObject.Property(nick="Window", type=int, default=1)
+    def window(self): return getattr(self, "_window", 1)
+
+    @window.setter
+    def window(self, value):
+        old = self.window if hasattr(self, "_window") else None
+        if old == value: return
+        if not self.changing and old != None: self.update("Window", value)
+        self._window = value
+    @GObject.Property(nick="Tab View", type=int, default=1)
+    def tab_view(self): return getattr(self, "_tab_view", 1)
+
+    @tab_view.setter
+    def tab_view(self, value):
+        old = self.tab_view if hasattr(self, "_tab_view") else None
+        if old == value: return
+        if not self.changing and old != None: self.update("Tab View", value)
+        self._tab_view = value
+    indexes = [("window", "tab_view"), ("window", "tab_view", "id")]
+
+class DataWindow(Window):
+    id = GObject.Property(type=int, nick="ID", default=1)
+    indexes = ["id"]
+    table = "Windows"
+    properties_extra = {"Default Width": "DEFAULT 360", "Default Height": "DEFAULT 720"}
+
+    def __init__(self, data=None, **kwargs):
+        super().__init__(**kwargs)
+        if data and "ID" in data:
+            self.id = data["ID"]
+        else:
+            self.id = max((i.id for i in self.__class__.get_all() if not i == self), default=0) + 1
+        if data:
+            for i in self.get_data_properties():
+                name = (i if isinstance(i, str) else i.name).replace("-", "_")
+                if name == "id": continue
+                prop = getattr(self.__class__, name, None)
+                title = getattr(prop, "nick", None) or name.replace("_", " ").title()
+                if title in data:
+                    if name in ("default_width", "default_height", "maximized"): self.set_property(name, data[title])
+                    else: setattr(self, name, data[title])
+        else: self.set_properties(default_width=360, default_height=720)
+        for i in self.get_data_properties():
+            if i in ("default_width", "default_height", "maximized"):
+                should_connect = True
+                i = i.replace("_", "-")
+            else:
+                i = getattr(self.__class__, i)
+                should_connect = hasattr(i.fset, "__func__")
+                i = i.name
+            if should_connect: self.connect(f"notify::{i}", self.__class__.changed)
+
+    @staticmethod
+    def changed(self, p):
+        if p.get_name() in ("default-width", "default-height", "maximized"):
+            v = self.get_property(p.get_name())
+            p = p.get_name().replace("-", " ").title()
+        else:
+            v = getattr(self, p.get_name().replace("-", "_"), None)
+            p = p.get_nick() or p.get_name().replace("-", " ").title()
+        self.get_data().update(table=self.__class__.table, column=p, conditions="ID = ?", conds=(self.id,), value=v)
+
+    @classmethod
+    def get_all(cls):
+        ws = []
+        for w in App.default.get_windows():
+            if not isinstance(w, cls): continue
+            ws.append(w)
+        return ws
+
+    @staticmethod
+    def get_data(): return App.default.data
+
+    @classmethod
+    def restore(cls, new=False):
+        d = cls.get_data().read(table="Windows", return_dict=True, force_tuple=True)
+        if not d:
+            if new: cls()
+            return
+        for i in d: cls(i)
+
+    @classmethod
+    def get_data_properties(cls):
+        l = [i for i in (cls.properties if hasattr(cls, "properties") else cls.list_properties())]
+        l.insert(0, "maximized")
+        l.insert(0, "default_height")
+        l.insert(0, "default_width")
+        l.insert(0, "id")
+        return l
+
 class DBUS:
     def __init__(self, interfaces, name, register, call, bus_type=None):
         super().__init__()
@@ -612,169 +1174,6 @@ class Autocomplete(Gtk.Popover):
         self = l.get_ancestor(Autocomplete)
         if not self: return
         if self.row_activate_function: self.row_activate_function(self.get_parent(), self, l.get_model().get_item(n))
-
-class Window(Adw.ApplicationWindow):
-
-    @classproperty
-    def current(*_): return next((i for i in Gtk.Window.list_toplevels() if hasattr(i, "get_application") and i.get_application() == App.default and isinstance(i, Window)), None)
-
-    def __init__(self, **kwargs):
-        if "title" in kwargs:
-            title = kwargs["title"]
-        else:
-            title = App.default.about.get_application_name() if App.default and App.default.about else App.default.get_application_id().rsplit(".", 1)[-1] if App.default else self.__class__.__name__
-        toast_overlay = Adw.ToastOverlay()
-        super().__init__(css_name=kwargs["css_name"] if "css_name" in kwargs else "window", application=App.default, content=toast_overlay, title=title, height_request=1, width_request=1, default_width=100, default_height=100)
-        if "content" in kwargs: self.set_content(kwargs["content"])
-        self.add_css_class(self.get_title().lower().replace(" ", "-") + "-window")
-        self.add_css_class(self.__class__.__name__.lower())
-        self.__class__.controller_init(self)
-
-    def add_actions(self, *actions):
-        for i in actions:
-            name, callback, accels = i[0], i[1], i[2] if len(i) == 3 else ""
-            self.add_action(Gio.SimpleAction.new(name, None))
-            if accels != "" and self.get_application(): self.get_application().set_accels_for_action(f"win.{name}", accels.split(" "))
-            if callback: self.lookup_action(name).connect("activate", callback, self)
-
-    def get_content(self): return Adw.ApplicationWindow.get_content(self).get_child()
-
-    def set_content(self, w): return Adw.ApplicationWindow.get_content(self).set_child(w)
-
-    def get_child(self): return Window.get_content(self)
-
-    def set_child(self, w): return Window.set_content(self, w)
-
-    def get_widget_at_popover(self, popover=None, x=0, y=0):
-        if not popover: return
-        s = popover.get_first_child().get_first_child()
-        p = self.compute_point(s, Graphene.Point.init(Graphene.Point(), x, y))[-1]
-        if p and s.get_width() >= p.x >= 0 and s.get_height() >= p.y >= 0: return s.pick(p.x, p.y, Gtk.PickFlags.DEFAULT)
-
-    def show_popover_at_widget(self, popover=None, widget=None, x=0, y=0):
-        if not popover or not widget: return
-        if popover.get_parent() != widget:
-            popover.unparent()
-            popover.set_parent(widget)
-        popover.present()
-        r = Gdk.Rectangle()
-        w = max(popover.get_first_child().get_preferred_size()[1].width, popover.get_property("width-request"))
-        p = self.compute_point(widget, Graphene.Point.init(Graphene.Point(), min(self.get_width() - 10, x + (min(w, 360) / 2)), y))[-1]
-        r.x, r.y = p.x, p.y
-        popover.set_pointing_to(r)
-        popover.popup()
-
-    def change_fullscreen(self, *_):
-        a = self.lookup_action("fullscreen") or Gio.Application.get_default().lookup_action("fullscreen")
-        if not a: return
-        if hasattr(self, "wide") and hasattr(self, "narrow"):
-            for i in (self.wide, self.narrow):
-                if a.get_state().unpack(): ToolbarFullscreen.fu(i)
-                else: ToolbarFullscreen.un(i)
-        elif hasattr(self, "toolbar"):
-            if a.get_state().unpack(): ToolbarFullscreen.fu(self.toolbar)
-            else: ToolbarFullscreen.un(self.toolbar)
-
-    @staticmethod
-    def draw_drag_update(e, x, y):
-        if e.get_current_button() != 1: return e.reset()
-        self = e.get_widget()
-        sx, sy = self.drag_start
-        self.drag_to = (sx + x, sy + y)
-        self.draw.queue_draw()
-        e.set_state(Gtk.EventSequenceState.CLAIMED)
-
-    @staticmethod
-    def reset_draw(d, w=0, h=0):
-        self = d.get_root()
-        self.drag_start = (0, 0)
-        self.draw.queue_draw()
-
-    @staticmethod
-    def click_to_args(*args):
-        e = n = x = y = signal = b = s = self = None
-        if isinstance(args[0], Gtk.EventController):
-            if isinstance(args[0], Gtk.GestureLongPress):
-                e, x, y, signal = args
-                n = 1
-            else:
-                e, n, x, y, signal = args
-            b = e.get_current_button()
-            s = e.get_current_event_state()
-            self = e.get_widget().get_root()
-        if isinstance(args[0], Window):
-            n = 1
-            self, x, y, signal, b, s = args
-        return self, e, n, x, y, signal, b, s
-
-    def key_to_click(self, v, signal="released", widget=False, mask=None):
-        if not hasattr(self, "on_click"): return
-        widget = widget or self.get_focus()
-        if not widget: return
-        bounds = widget.compute_bounds(self)[1]
-        x, y = bounds.get_x() + 1, bounds.get_y() + 1
-        if v == Gdk.KEY_Menu: self.on_click(self, x, y, signal, 3, mask)
-        if v == Gdk.KEY_space: self.on_click(self, x, y, signal, 1, mask)
-        if Gdk.ModifierType.SHIFT_MASK in mask and v == Gdk.KEY_Return: self.on_click(self, x, y, signal, 2, mask)
-
-    def controller_init(self, widget=None):
-        widget = widget or self
-        if hasattr(self.__class__, "on_click"):
-            for e in (Gtk.GestureClick(button=0), Gtk.GestureLongPress(button=0)):
-                e.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-                e.set_propagation_limit(Gtk.PropagationLimit.NONE)
-                e.connect("pressed", self.__class__.on_click, "pressed")
-                if isinstance(e, Gtk.GestureClick): e.connect("released", self.__class__.on_click, "released")
-                widget.add_controller(e)
-        if hasattr(self.__class__, "on_scroll"):
-            e = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.VERTICAL | Gtk.EventControllerScrollFlags.DISCRETE)
-            e.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-            e.connect("scroll", self.__class__.on_scroll)
-            widget.add_controller(e)
-        s = ("drag-update", "drag-begin", "drag-end")
-        if any((hasattr(self.__class__, "on_gesture_drag_" + i.replace("-", "_")) for i in s)):
-            e = Gtk.GestureDrag(button=0)
-            for i in s:
-                n = "on_gesture_drag_" + i.replace("-", "_")
-                if hasattr(self.__class__, n): e.connect(i, getattr(self.__class__, n))
-            widget.add_controller(e)
-        s = ("prepare", "drag-begin", "drag-end")
-        if any((hasattr(self.__class__, "on_drag_source_" + i.replace("-", "_")) for i in s)):
-            e = Gtk.DragSource(propagation_phase=Gtk.PropagationPhase.CAPTURE)
-            e.set_propagation_limit(Gtk.PropagationLimit.NONE)
-            e.set_actions(self.__class__.drag_actions if hasattr(self.__class__, "drag_actions") else Gdk.DragAction.COPY)
-            for i in s:
-                n = "on_drag_source_" + i.replace("-", "_")
-                if hasattr(self.__class__, n): e.connect(i, getattr(self.__class__, n))
-            widget.add_controller(e)
-        s = ("drop", "enter", "leave", "motion")
-        if any((hasattr(self.__class__, "on_drop_target_" + i) for i in s)):
-            e = Gtk.DropTarget(preload=True)
-            e.set_propagation_limit(Gtk.PropagationLimit.NONE)
-            e.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-            e.set_actions(self.__class__.drop_actions if hasattr(self.__class__, "drop_actions") else Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
-            if hasattr(self.__class__, "drop_target_gtypes"): e.set_gtypes(self.__class__.drop_target_gtypes)
-            for i in s:
-                n = "on_drop_target_" + i
-                if hasattr(self.__class__, n): e.connect(i, getattr(self.__class__, n))
-            widget.add_controller(e)
-
-        s = ("enter", "leave", "motion")
-        if any((hasattr(self.__class__, "on_event_" + i) for i in s)):
-            e = Gtk.EventControllerMotion()
-            if isinstance(self, Gtk.Root):
-                e.set_propagation_limit(Gtk.PropagationLimit.NONE)
-                e.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
-            for i in s:
-                n = "on_event_" + i
-                if hasattr(self.__class__, n): e.connect(i, getattr(self.__class__, n))
-            widget.add_controller(e)
-        if hasattr(self.__class__, "on_key_released") or hasattr(self.__class__, "on_key_pressed"):
-            e = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)
-            if hasattr(self.__class__, "on_key_released"): e.connect("key-released", self.__class__.on_key_released)
-            if hasattr(self.__class__, "on_key_pressed"): e.connect("key-pressed", self.__class__.on_key_pressed)
-            widget.add_controller(e)
-        if hasattr(self.__class__, "on_map"): self.connect("map", self.__class__.on_map)
 
 class PopupDialogButton(Gtk.Button):
     def __init__(self):
@@ -4047,6 +4446,7 @@ def get_variant(v): return GLib.Variant("d" if type(v) == float else "s" if type
 def variant_bind(b, v): return get_variant(v)
 def convert_bind(b, v): return v
 def alphabetical_sort(e): return GLib.utf8_collate_key_for_filename(e.get_path() if isinstance(e, Gio.File) else str(e), -1)
+def id_sort(i): return int(i.get("ID", "0") or 0)
 def datetime_sort(i): return i.to_unix()
 def current_page(n, l): return (n - 1) // l + 1
 def total_pages(t, l): return (t + l - 1) // l
