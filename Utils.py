@@ -3224,7 +3224,7 @@ class App(Adw.Application):
         if hasattr(sys, "_MEIPASS"): Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(Path(sys._MEIPASS, "assets"))
         self.utils_css = self.__class__.UTILS_CSS + "\n"
         self.bind_property("css", CSS(), "css", SYNC_BIND)
-        for i in ("utils-css", "color-css"): self.bind_property(i, CSS(priority=Gtk.STYLE_PROVIDER_PRIORITY_THEME), "css", SYNC_BIND)
+        for i in ("utils-css", "color-css"): self.bind_property(i, CSS(), "css", SYNC_BIND)
         self.data_folder = data_folder or Gio.File.new_for_path(DATA)
         self.add_actions(*actions)
         if info:
