@@ -60,30 +60,11 @@ class Data(GObject.Object):
             for i in l:
                 name = (i if isinstance(i, str) else i.name).replace("-", "_")
                 prop = getattr(item, name, None)
+                if not prop and hasattr(item, "find_property") and item.find_property(name.replace("_", "-")):
+                    prop = item.find_property(name.replace("_", "-"))
                 title = getattr(prop, "nick", None) or name.replace("_", " ").title()
-                t = getattr(getattr(prop, "type", None), "name", "")
+                t = getattr(getattr(prop, "type", False) or getattr(prop, "value_type", False), "name", "")
                 ty = ""
-                if issubclass(item, DataWindowTabViewTab):
-                    if name == "window":
-                        t = "gint"
-                    if name == "tab_view":
-                        t = "gint"
-                if issubclass(item, DataWindowTab):
-                    if name == "window":
-                        t = "gint"
-                if issubclass(item, DataTabViewTab):
-                    if name == "tab_view":
-                        t = "gint"
-                if issubclass(item, DataTab):
-                    if name == "id":
-                        t = "gint"
-                if issubclass(item, DataWindow):
-                    if name == "id":
-                        t = "gint"
-                    if name in ("default_width", "default_height"):
-                        t = "gint"
-                    if name == "maximized":
-                        t = "gboolean"
                 if title == "NONE": continue
                 if t == "gdouble":
                     ty = "REAL"
@@ -92,13 +73,16 @@ class Data(GObject.Object):
                 if t in ("gint", "gboolean"):
                     ty = "INTEGER"
                 key = {"Name": title, "Type": ty, "Rest": ""}
-                default = getattr(prop, "default", None)
+                if hasattr(prop, "get_default_value"):
+                    default = prop.get_default_value()
+                else:
+                    default = getattr(prop, "default", None)
                 if t == "gboolean" and default != None:
-                    key["Rest"] += f"NOT NULL DEFAULT {int(prop.default)}"
+                    key["Rest"] += f"NOT NULL DEFAULT {int(default)}"
                 elif type(default) == int:
-                    key["Rest"] += f"DEFAULT {prop.default}"
+                    key["Rest"] += f"DEFAULT {default}"
                 elif t == "gchararray" and default != None:
-                    key["Rest"] += f"DEFAULT \"{prop.default}\""
+                    key["Rest"] += f"DEFAULT \"{default}\""
                 key["Rest"] = key["Rest"].strip()
                 d = getattr(item, "properties_extra", {}).get(title, False)
                 if d:
@@ -672,6 +656,8 @@ class DataTabView(Adw.Bin):
     def set_shortcuts(self, v=None):
         self.shortcuts = v
 
+    def remove_shortcuts(self, *args): self.get_child().remove_shortcuts(*args)
+
     def transfer_page(self, page, other_view, position):
         if hasattr(page, "tab"):
             page = page.tab
@@ -957,17 +943,17 @@ class DataWindow(Window):
                 prop = getattr(self.__class__, name, None)
                 title = getattr(prop, "nick", None) or name.replace("_", " ").title()
                 if title in data:
-                    if name in ("default_width", "default_height", "maximized"): self.set_property(name, data[title])
-                    else: setattr(self, name, data[title])
+                    if hasattr(self, name): setattr(self, name, data[title])
+                    elif self.find_property(name.replace("_", "-")): self.set_property(name.replace("_", "-"), data[title])
         else: self.set_properties(default_width=360, default_height=720)
         for i in self.get_data_properties():
-            if i in ("default_width", "default_height", "maximized"):
-                should_connect = True
-                i = i.replace("_", "-")
-            else:
+            if hasattr(self, i):
                 i = getattr(self.__class__, i)
                 should_connect = hasattr(i.fset, "__func__")
                 i = i.name
+            elif self.find_property(i.replace("_", "-")):
+                should_connect = True
+                i = i.replace("_", "-")
             if should_connect: self.connect(f"notify::{i}", self.__class__.changed)
 
     @staticmethod
