@@ -677,6 +677,8 @@ class DataTabView(Adw.Bin):
 
     def get_selected_page(self): return self.get_child().get_selected_page()
 
+    def set_selected_page(self, v=None): return self.get_child().set_selected_page(v)
+
     def get_pages(self): return self.get_child().get_pages()
 
     def get_n_pages(self): return self.get_child().get_n_pages()
@@ -2541,7 +2543,8 @@ class MediaStream(GObject.Object, Gdk.Paintable):
                 s = "giostreamsrc"
         try:
             if isinstance(data, Gst.Buffer) and caps and self.__class__.PAINTABLE_SINK:
-                self.pipeline = Gst.parse_bin_from_description(f"appsrc emit-signals=false block=false name=Source caps={caps}")
+                self.pipeline = Gst.parse_bin_from_description("appsrc emit-signals=false block=false name=Source" + (f" caps={caps}" if isinstance(caps, str) else ""))
+                if not isinstance(caps, str): self.pipeline.get_by_name("Source").set_property("caps", caps)
             else:
                 self.pipeline = Gst.parse_launch(f"{s} name=Source {s2}decodebin3 async_handling=false message_forward=false name=Decode ! fakesink sync=false qos=false name=Fake")
             if self.lock_until_done:
