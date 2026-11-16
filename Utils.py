@@ -1840,6 +1840,7 @@ class Prompt(Adw.AlertDialog):
         self.responses = responses
         self.confirm_callback = confirm_callback
         super().__init__(**kwargs)
+        self.set_property("close-response", responses[0])
         if callback: self.connect("response", self.__class__.callback if confirm_callback else callback)
         for i in self.responses: self.add_response(i, i.title())
         if appearance: self.set_response_appearance(self.responses[-1], appearance)
