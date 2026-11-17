@@ -955,17 +955,18 @@ class DataWindow(Window):
                 i = i.name
             elif self.find_property(i.replace("_", "-")):
                 should_connect = True
-                i = i.replace("_", "-")
+            i = i.replace("_", "-")
             if should_connect: self.connect(f"notify::{i}", self.__class__.changed)
 
     @staticmethod
     def changed(self, p):
-        if p.get_name() in ("default-width", "default-height", "maximized"):
-            v = self.get_property(p.get_name())
-            p = p.get_name().replace("-", " ").title()
+        i = p.get_name().replace("-", "_")
+        if hasattr(self, i):
+            v = getattr(self, i, None)
+            p = p.get_nick() or i.replace("_", " ").title()
         else:
-            v = getattr(self, p.get_name().replace("-", "_"), None)
-            p = p.get_nick() or p.get_name().replace("-", " ").title()
+            v = self.get_property(p.get_name())
+            p = i.replace("_", " ").title()
         self.get_data().update(table=self.__class__.table, column=p, conditions="ID = ?", conds=(self.id,), value=v)
 
     @classmethod
